@@ -1,0 +1,9 @@
+{
+  "name": "H.U.G.H. - Guardian System",
+  "description": "Hyper-Unified Guardian and Harbormaster. A personal AI integrated into family life with episodic memory and adaptive architecture.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation",
+    "camera"
+  ]
+}
