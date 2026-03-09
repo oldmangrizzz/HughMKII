@@ -15,7 +15,7 @@ export const SovereignPanel: React.FC<SovereignPanelProps> = ({
 
   return (
     <div className="sovereign-panel-wrapper">
-      <div className="sovereign-panel glow-border">
+      <div className="sovereign-panel">
         <div className="sovereign-panel-header">
           <div className="sovereign-panel-title">{title}</div>
           <div className="sovereign-panel-title-line" aria-hidden="true" />

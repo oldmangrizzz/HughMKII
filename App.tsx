@@ -1,7 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { CliffordField } from './components/CliffordField'
-import { SymbioteNav } from './components/SymbioteNav'
+import { TopNav } from './components/TopNav'
 import { SovereignPanel } from './components/SovereignPanel'
+import { HughPresenceOverlay, useHughStatus } from './components/HughPresence'
+import { VoicePortal } from './components/VoicePortal'
 import { Dashboard } from './components/Dashboard'
 import { Visualizer } from './components/Visualizer'
 import { OmniChat } from './components/OmniChat'
@@ -30,7 +32,37 @@ const MODE_TITLES: Record<AppMode, string> = {
 }
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<AppMode>(AppMode.DASHBOARD)
+  const [mode, setMode] = useState<AppMode>(AppMode.HOTL_DASHBOARD)
+  const mouseRef = useRef<[number, number]>([0, 0])
+  const innerRef = useRef<HTMLDivElement>(null)
+  const hughStatus = useHughStatus()
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const nx = (e.clientX / window.innerWidth - 0.5) * 2
+    const ny = -(e.clientY / window.innerHeight - 0.5) * 2
+    mouseRef.current = [nx, ny]
+    if (innerRef.current) {
+      const tX = ny * 1.5
+      const tY = nx * 1.0
+      innerRef.current.style.transform = `rotateX(${tX}deg) rotateY(${tY}deg)`
+    }
+  }, [])
+
+  const handleVoiceSubmit = useCallback((text: string) => {
+    setMode(AppMode.CHAT)
+    window.dispatchEvent(new CustomEvent('hugh:voice-submit', { detail: { text } }))
+  }, [])
+
+  if (mode === AppMode.WORKSHOP) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'var(--void)', overflow: 'hidden' }}>
+        <TopNav currentMode={mode} setMode={setMode} />
+        <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+          <Workshop />
+        </div>
+      </div>
+    )
+  }
 
   const renderContent = (): React.ReactNode => {
     switch (mode) {
@@ -52,34 +84,30 @@ const App: React.FC = () => {
     }
   }
 
-  const isWorkshop = mode === AppMode.WORKSHOP
-
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'var(--void)', overflow: 'hidden' }}>
-      {/* Clifford attractor background — hidden in Workshop to avoid canvas querySelector conflict */}
-      {!isWorkshop && <CliffordField activeMode={mode} />}
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'var(--void)', overflow: 'hidden' }}
+      onMouseMove={handleMouseMove}
+    >
+      <CliffordField
+        activeMode={mode}
+        hughOnline={hughStatus.online}
+        hughProcessing={hughStatus.processing}
+        mouse={mouseRef}
+      />
 
-      {/* Navigation overlay */}
-      <SymbioteNav currentMode={mode} setMode={setMode} />
+      <TopNav currentMode={mode} setMode={setMode} />
+      <HughPresenceOverlay status={hughStatus} />
 
-      {/* Workshop: full-screen, no panel wrapper, no nav offset */}
-      {isWorkshop && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
-          <Workshop />
-        </div>
-      )}
-
-      {/* All other modes: offset from nav, wrapped in SovereignPanel */}
-      {!isWorkshop && (
-        <main
-          className="sovereign-main"
-          style={{ zIndex: 5 }}
-        >
+      <main className="sovereign-main" style={{ zIndex: 5 }}>
+        <div ref={innerRef} className="sovereign-main-inner">
           <SovereignPanel key={mode} title={MODE_TITLES[mode]}>
             {renderContent()}
           </SovereignPanel>
-        </main>
-      )}
+        </div>
+      </main>
+
+      <VoicePortal onSubmit={handleVoiceSubmit} />
     </div>
   )
 }

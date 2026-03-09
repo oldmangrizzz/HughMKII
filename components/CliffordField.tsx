@@ -1,19 +1,14 @@
 import React, { useMemo, useRef, useEffect } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { AppMode } from '../types'
 
-const POINT_COUNT = 80_000
-const STEPS_PER_FRAME = 300
+const LINE_COUNT = 500
+const LINE_LENGTH = 100
 
-interface AttractorPreset {
-  a: number
-  b: number
-  c: number
-  d: number
-}
+interface AttractorParams { a: number; b: number; c: number; d: number }
 
-const ATTRACTOR_PRESETS: AttractorPreset[] = [
+const ATTRACTOR_PRESETS: AttractorParams[] = [
   { a: -1.4, b: 1.6, c: 1.0, d: 0.7 },
   { a: -1.7, b: 1.3, c: -0.1, d: -1.2 },
   { a: 1.5, b: -1.8, c: 1.6, d: 0.9 },
@@ -34,189 +29,223 @@ const MODE_HUE: Record<string, number> = {
   [AppMode.SITUATIONAL_AWARENESS]: 0.38,
 }
 
-function generateClifford(n: number, a: number, b: number, c: number, d: number): Float32Array {
-  const positions = new Float32Array(n * 3)
-  let x = 0, y = 0
-  for (let i = 0; i < n; i++) {
-    const nx = Math.sin(a * y) + c * Math.cos(a * x)
-    const ny = Math.sin(b * x) + d * Math.cos(b * y)
-    x = nx; y = ny
-    positions[i * 3] = x
-    positions[i * 3 + 1] = y
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 0.02
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const i = Math.floor(h * 6)
+  const f = h * 6 - i
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s)
+  switch (i % 6) {
+    case 0: return [v, t, p]; case 1: return [q, v, p]; case 2: return [p, v, t]
+    case 3: return [p, q, v]; case 4: return [t, p, v]; default: return [v, p, q]
   }
-  return positions
 }
 
-const vertexShader = /* glsl */`
-  uniform float uTime;
-  uniform float uBaseHue;
-  attribute float aVelocity;
-  varying vec3 vColor;
-  varying float vAlpha;
-
-  vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-  }
-
-  void main() {
-    float hue = mod(uBaseHue + uTime * 0.015 + aVelocity * 0.18, 1.0);
-    float sat = 0.75 + aVelocity * 0.25;
-    float val = 0.6 + aVelocity * 0.4;
-    vColor = hsv2rgb(vec3(hue, sat, val));
-    vAlpha = 0.35 + aVelocity * 0.65;
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = (1.2 + aVelocity * 2.8) * (300.0 / -mvPosition.z);
-    gl_Position = projectionMatrix * mvPosition;
-  }
-`
-
-const fragmentShader = /* glsl */`
-  varying vec3 vColor;
-  varying float vAlpha;
-
-  void main() {
-    vec2 uv = gl_PointCoord - vec2(0.5);
-    float d = length(uv);
-    if (d > 0.5) discard;
-    float alpha = smoothstep(0.5, 0.0, d) * vAlpha;
-    gl_FragColor = vec4(vColor, alpha);
-  }
-`
-
-interface ParticleFieldProps {
-  activeMode: AppMode
+function cliffordStep(x: number, y: number, p: AttractorParams): [number, number] {
+  return [Math.sin(p.a * y) + p.c * Math.cos(p.a * x), Math.sin(p.b * x) + p.d * Math.cos(p.b * y)]
 }
 
-function ParticleField({ activeMode }: ParticleFieldProps) {
-  const pointsRef = useRef<THREE.Points>(null)
+function CameraRig({ mouse }: { mouse: React.MutableRefObject<[number, number]> }) {
+  const { camera } = useThree()
+  const smooth = useRef([0, 0])
+  useFrame(() => {
+    smooth.current[0] += (mouse.current[0] * 0.35 - smooth.current[0]) * 0.05
+    smooth.current[1] += (mouse.current[1] * 0.25 - smooth.current[1]) * 0.05
+    camera.position.x = smooth.current[0]
+    camera.position.y = smooth.current[1]
+    camera.position.z = 4
+    camera.lookAt(0, 0, 0)
+  })
+  return null
+}
 
-  const iterState = useRef({
-    x: 0.1,
-    y: 0.1,
-    writeIndex: 0,
-    presetIndex: 0,
-    presetTimer: 0.0,
-    lerpT: 1.0,
-    currentParams: { ...ATTRACTOR_PRESETS[0] } as AttractorPreset,
-    nextParams: { ...ATTRACTOR_PRESETS[1] } as AttractorPreset,
+function HughLocusMesh({ online, processing }: { online: boolean; processing: boolean }) {
+  const coreRef = useRef<THREE.Mesh>(null)
+  const ringRef = useRef<THREE.Mesh>(null)
+  const drift = useRef({ x: 1.2, y: 0.7, vx: 0.0015, vy: 0.001 })
+
+  useFrame((state) => {
+    const d = drift.current
+    d.x += d.vx; d.y += d.vy
+    if (d.x > 1.9 || d.x < 0.5) d.vx *= -1
+    if (d.y > 1.2 || d.y < 0.2) d.vy *= -1
+
+    const t = state.clock.elapsedTime
+    const pulse = Math.sin(t * (processing ? 5 : 1.5)) * 0.5 + 0.5
+
+    if (coreRef.current) {
+      coreRef.current.position.set(d.x, d.y, 0.05)
+      const sc = (online ? 1 : 0.3) * (1 + (processing ? pulse * 0.8 : pulse * 0.15))
+      coreRef.current.scale.setScalar(sc)
+      ;(coreRef.current.material as THREE.MeshBasicMaterial).opacity = online
+        ? (processing ? 0.5 + pulse * 0.5 : 0.25 + pulse * 0.1)
+        : 0.08
+    }
+    if (ringRef.current) {
+      ringRef.current.position.set(d.x, d.y, 0)
+      ringRef.current.rotation.z = t * 0.25
+      ringRef.current.scale.setScalar(1 + Math.sin(t * 0.7) * 0.15)
+      ;(ringRef.current.material as THREE.MeshBasicMaterial).opacity = online ? 0.12 : 0.03
+    }
   })
 
-  const geometry = useMemo(() => {
+  return (
+    <group>
+      <mesh ref={coreRef}>
+        <sphereGeometry args={[0.045, 8, 8]} />
+        <meshBasicMaterial color="#00ffcc" transparent opacity={0.25} />
+      </mesh>
+      <mesh ref={ringRef}>
+        <ringGeometry args={[0.09, 0.12, 32]} />
+        <meshBasicMaterial color="#00ffcc" transparent opacity={0.12} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
+interface FlowFieldProps {
+  activeMode: AppMode
+  hughOnline: boolean
+  hughProcessing: boolean
+}
+
+function FlowField({ activeMode, hughOnline, hughProcessing }: FlowFieldProps) {
+  const groupRef = useRef<THREE.Group>(null)
+  const seeds = useRef<Float32Array>(new Float32Array(LINE_COUNT * 2))
+
+  const iterState = useRef({
+    presetIndex: 0, presetTimer: 0, lerpT: 1.0,
+    currentParams: { ...ATTRACTOR_PRESETS[0] } as AttractorParams,
+    nextParams: { ...ATTRACTOR_PRESETS[1] } as AttractorParams,
+  })
+
+  const targetHue = useRef(MODE_HUE[activeMode] ?? 0.74)
+  const currentHue = useRef(MODE_HUE[activeMode] ?? 0.74)
+
+  useEffect(() => { targetHue.current = MODE_HUE[activeMode] ?? 0.74 }, [activeMode])
+
+  const { geometry, material } = useMemo(() => {
+    const segPerLine = LINE_LENGTH - 1
+    const totalVerts = LINE_COUNT * segPerLine * 2
+    const positions = new Float32Array(totalVerts * 3)
+    const colors = new Float32Array(totalVerts * 3)
     const geo = new THREE.BufferGeometry()
-    const p = ATTRACTOR_PRESETS[0]
-    const positions = generateClifford(POINT_COUNT, p.a, p.b, p.c, p.d)
-    const velocities = new Float32Array(POINT_COUNT)
-    for (let i = 0; i < POINT_COUNT - 1; i++) {
-      const dx = positions[(i + 1) * 3] - positions[i * 3]
-      const dy = positions[(i + 1) * 3 + 1] - positions[i * 3 + 1]
-      velocities[i] = Math.min(Math.sqrt(dx * dx + dy * dy), 1.0)
-    }
-    velocities[POINT_COUNT - 1] = 0.5
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    geo.setAttribute('aVelocity', new THREE.BufferAttribute(velocities, 1))
-    return geo
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+
+    const p = ATTRACTOR_PRESETS[0]
+    let sx = 0.1, sy = 0.2
+    for (let i = 0; i < LINE_COUNT; i++) {
+      for (let w = 0; w < 60 + i * 3; w++) {
+        const [nx, ny] = cliffordStep(sx, sy, p)
+        sx = nx; sy = ny
+      }
+      seeds.current[i * 2] = sx
+      seeds.current[i * 2 + 1] = sy
+    }
+
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+    })
+    return { geometry: geo, material: mat }
   }, [])
-
-  const material = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader,
-    fragmentShader,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    transparent: true,
-    uniforms: {
-      uTime: { value: 0 },
-      uBaseHue: { value: MODE_HUE[activeMode] ?? 0.74 },
-    },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [])
-
-  useEffect(() => {
-    material.uniforms.uBaseHue.value = MODE_HUE[activeMode] ?? 0.74
-  }, [activeMode, material])
 
   useFrame((state, delta) => {
     const s = iterState.current
     s.presetTimer += delta
-
     if (s.presetTimer > 30) {
       s.presetTimer = 0
       s.presetIndex = (s.presetIndex + 1) % ATTRACTOR_PRESETS.length
       s.nextParams = { ...ATTRACTOR_PRESETS[(s.presetIndex + 1) % ATTRACTOR_PRESETS.length] }
       s.lerpT = 0
     }
-
-    if (s.lerpT < 1.0) {
-      s.lerpT = Math.min(s.lerpT + delta * 0.04, 1.0)
+    if (s.lerpT < 1) {
+      s.lerpT = Math.min(s.lerpT + delta * 0.04, 1)
       const curr = ATTRACTOR_PRESETS[s.presetIndex]
       const t = s.lerpT
       s.currentParams = {
-        a: curr.a + (s.nextParams.a - curr.a) * t,
-        b: curr.b + (s.nextParams.b - curr.b) * t,
-        c: curr.c + (s.nextParams.c - curr.c) * t,
-        d: curr.d + (s.nextParams.d - curr.d) * t,
+        a: curr.a + (s.nextParams.a - curr.a) * t, b: curr.b + (s.nextParams.b - curr.b) * t,
+        c: curr.c + (s.nextParams.c - curr.c) * t, d: curr.d + (s.nextParams.d - curr.d) * t,
       }
     }
 
+    currentHue.current += (targetHue.current - currentHue.current) * delta * 0.4
+    const hue = (currentHue.current + state.clock.elapsedTime * 0.008) % 1
+    const speedMult = hughProcessing ? 2 : 1
+    const brightness = hughOnline ? 1.0 : 0.55
+
+    const p = s.currentParams
     const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute
-    const velAttr = geometry.getAttribute('aVelocity') as THREE.BufferAttribute
+    const colAttr = geometry.getAttribute('color') as THREE.BufferAttribute
     const posArr = posAttr.array as Float32Array
-    const velArr = velAttr.array as Float32Array
+    const colArr = colAttr.array as Float32Array
 
-    const { a, b, c, d } = s.currentParams
+    const segPerLine = LINE_LENGTH - 1
+    const vertsPerLine = segPerLine * 2
 
-    for (let i = 0; i < STEPS_PER_FRAME; i++) {
-      const nx = Math.sin(a * s.y) + c * Math.cos(a * s.x)
-      const ny = Math.sin(b * s.x) + d * Math.cos(b * s.y)
-      const ddx = nx - s.x
-      const ddy = ny - s.y
-      s.x = nx; s.y = ny
+    for (let i = 0; i < LINE_COUNT; i++) {
+      let x = seeds.current[i * 2]
+      let y = seeds.current[i * 2 + 1]
+      for (let adv = 0; adv < speedMult; adv++) {
+        const [nx, ny] = cliffordStep(x, y, p); x = nx; y = ny
+      }
+      seeds.current[i * 2] = x; seeds.current[i * 2 + 1] = y
 
-      const idx = s.writeIndex % POINT_COUNT
-      posArr[idx * 3] = s.x
-      posArr[idx * 3 + 1] = s.y
-      posArr[idx * 3 + 2] = (Math.random() - 0.5) * 0.02
-      velArr[idx] = Math.min(Math.sqrt(ddx * ddx + ddy * ddy), 1.0)
-      s.writeIndex++
+      const pts: [number, number][] = [[x, y]]
+      let lx = x, ly = y
+      for (let j = 1; j < LINE_LENGTH; j++) {
+        const [nx, ny] = cliffordStep(lx, ly, p); lx = nx; ly = ny; pts.push([lx, ly])
+      }
+
+      const lineHue = (hue + i * 0.00025) % 1
+      const base = i * vertsPerLine
+
+      for (let j = 0; j < segPerLine; j++) {
+        const tHead = j / segPerLine
+        const tTail = (j + 1) / segPerLine
+        const valH = (1 - tHead) * brightness
+        const valT = (1 - tTail) * brightness
+
+        const [rH, gH, bH] = hsvToRgb(lineHue, 0.7 + (1-tHead)*0.3, valH)
+        const [rT, gT, bT] = hsvToRgb(lineHue, 0.7 + (1-tTail)*0.3, valT)
+
+        const v0 = base + j * 2, v1 = v0 + 1
+        const [ax, ay] = pts[j]; const [bx, by_] = pts[j + 1]
+        posArr[v0*3]=ax*2; posArr[v0*3+1]=ay*2; posArr[v0*3+2]=0
+        posArr[v1*3]=bx*2; posArr[v1*3+1]=by_*2; posArr[v1*3+2]=0
+        const aA = (1-tHead)*0.75, bA = (1-tTail)*0.75
+        colArr[v0*3]=rH*aA; colArr[v0*3+1]=gH*aA; colArr[v0*3+2]=bH*aA
+        colArr[v1*3]=rT*bA; colArr[v1*3+1]=gT*bA; colArr[v1*3+2]=bT*bA
+      }
     }
-
-    posAttr.needsUpdate = true
-    velAttr.needsUpdate = true
-
-    if (pointsRef.current) {
-      pointsRef.current.rotation.z += delta * 0.015
-    }
-
-    material.uniforms.uTime.value = state.clock.elapsedTime
+    posAttr.needsUpdate = true; colAttr.needsUpdate = true
+    if (groupRef.current) groupRef.current.rotation.z += delta * 0.007
   })
 
-  return (
-    <points
-      ref={pointsRef}
-      geometry={geometry}
-      material={material}
-      scale={[2.0, 2.0, 1.0]}
-    />
-  )
+  return <group ref={groupRef}><lineSegments geometry={geometry} material={material} /></group>
 }
 
-interface CliffordFieldProps {
+export interface CliffordFieldProps {
   activeMode: AppMode
+  hughOnline?: boolean
+  hughProcessing?: boolean
+  mouse: React.MutableRefObject<[number, number]>
 }
 
-export const CliffordField: React.FC<CliffordFieldProps> = ({ activeMode }) => {
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
-      <Canvas
-        camera={{ position: [0, 0, 4], fov: 65 }}
-        gl={{ alpha: true, antialias: false, powerPreference: 'high-performance' }}
-        style={{ width: '100%', height: '100%' }}
-        dpr={[1, 1.5]}
-      >
-        <ParticleField activeMode={activeMode} />
-      </Canvas>
-    </div>
-  )
-}
+export const CliffordField: React.FC<CliffordFieldProps> = ({
+  activeMode, hughOnline = true, hughProcessing = false, mouse,
+}) => (
+  <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+    <Canvas
+      camera={{ position: [0, 0, 4], fov: 65 }}
+      gl={{ alpha: true, antialias: false, powerPreference: 'high-performance' }}
+      style={{ width: '100%', height: '100%' }}
+      dpr={[1, 1.5]}
+    >
+      <CameraRig mouse={mouse} />
+      <FlowField activeMode={activeMode} hughOnline={hughOnline} hughProcessing={hughProcessing} />
+      <HughLocusMesh online={hughOnline} processing={hughProcessing} />
+    </Canvas>
+  </div>
+)
