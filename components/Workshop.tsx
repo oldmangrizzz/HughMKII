@@ -1,7 +1,26 @@
-import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Text, Grid, Environment } from '@react-three/drei'
+import { XR, createXRStore } from '@react-three/xr'
+import { ConvexProvider, ConvexReactClient, useQuery, useMutation } from 'convex/react'
 import * as THREE from 'three'
+
+// ─── XR store (Quest 3 immersive-vr) ─────────────────────────────────────────
+const xrStore = createXRStore()
+
+// ─── Convex client ────────────────────────────────────────────────────────────
+const convexClient = new ConvexReactClient(
+  (import.meta.env as any).VITE_CONVEX_URL ?? 'https://placeholder.convex.cloud'
+)
+
+// ─── Convex API string refs (workshop codegen pending) ────────────────────────
+const workshopApi = {
+  getWorkshopEntities: 'workshop:getWorkshopEntities' as any,
+  getEnvironmentState: 'workshop:getEnvironmentState' as any,
+  upsertWorkshopEntity: 'workshop:upsertWorkshopEntity' as any,
+}
+
+const WORKSHOP_SESSION_ID = 'workshop-main'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,32 +87,34 @@ function parseVoiceCommand(transcript: string): Partial<WorkshopEntity> | null {
   return null
 }
 
-// ─── Convex mock / stub (swappable for real convex/react hooks) ───────────────
+// ─── Convex-backed workshop hooks ─────────────────────────────────────────────
 
-function useWorkshopEntities(): [WorkshopEntity[], (e: WorkshopEntity) => void] {
-  const [entities, setEntities] = useState<WorkshopEntity[]>([])
-
-  const addEntity = useCallback((entity: WorkshopEntity) => {
-    setEntities(prev => [...prev, entity])
-    // TODO: replace with useMutation('workshop:createEntity') when Convex is wired
-  }, [])
-
-  return [entities, addEntity]
+function useConvexWorkshopEntities(): WorkshopEntity[] {
+  const convexRaw = useQuery(workshopApi.getWorkshopEntities) as any[] | undefined
+  return useMemo(() => {
+    if (!convexRaw) return []
+    return convexRaw.map((e: any) => ({
+      id: e.entityId,
+      type: (e.type === 'custom' ? 'box' : e.type) as WorkshopEntity['type'],
+      position: [e.positionX, e.positionY, e.positionZ] as [number, number, number],
+      rotation: [e.rotationX, e.rotationY, e.rotationZ] as [number, number, number],
+      scale: [e.scaleX, e.scaleY, e.scaleZ] as [number, number, number],
+      color: e.color,
+      label: e.label,
+      createdAt: e.createdAt,
+    }))
+  }, [convexRaw])
 }
 
-function useWorkshopEnvironment(): WorkshopEnvironment {
-  const [env, setEnv] = useState<WorkshopEnvironment>({ healthStatus: 'nominal' })
-
-  useEffect(() => {
-    // TODO: replace with useQuery('workshop:getEnvironment') when Convex is wired
-    // Simulate a nominal environment; real integration reads from somatic_telemetry
-    const id = setInterval(() => {
-      setEnv(prev => ({ ...prev, lastUpdated: Date.now() }))
-    }, 30000)
-    return () => clearInterval(id)
-  }, [])
-
-  return env
+function useConvexEnvironment(): WorkshopEnvironment {
+  const convexEnv = useQuery(workshopApi.getEnvironmentState, { sessionId: WORKSHOP_SESSION_ID }) as any
+  if (convexEnv) {
+    return {
+      healthStatus: (convexEnv.healthStatus ?? 'nominal') as HealthStatus,
+      lastUpdated: convexEnv.updatedAt,
+    }
+  }
+  return { healthStatus: 'nominal' }
 }
 
 // ─── 3D Sub-components ────────────────────────────────────────────────────────
@@ -285,7 +306,66 @@ const HughPresence: React.FC = () => {
   )
 }
 
-// Ambient light that shifts colour based on server health
+// ─── DynamicEntityRenderer — maps Convex DB documents → Three.js meshes ──────
+
+function EntityMesh({ entity }: { entity: WorkshopEntity }) {
+  const meshRef = useRef<THREE.Mesh>(null)
+  const color = entity.color ?? '#888888'
+
+  const geometry = useMemo(() => {
+    switch (entity.type) {
+      case 'table':  return <boxGeometry args={[2, 0.1, 1]} />
+      case 'screen': return <planeGeometry args={[1.6, 0.9]} />
+      case 'chair':  return <boxGeometry args={[0.5, 0.5, 0.5]} />
+      case 'light':  return <sphereGeometry args={[0.15, 16, 16]} />
+      case 'box':    return <boxGeometry args={[0.5, 0.5, 0.5]} />
+      case 'sphere': return <sphereGeometry args={[0.3, 32, 32]} />
+      case 'plane':  return <planeGeometry args={[2, 2]} />
+      default:       return <boxGeometry args={[0.5, 0.5, 0.5]} />
+    }
+  }, [entity.type])
+
+  return (
+    <mesh
+      ref={meshRef}
+      position={entity.position}
+      rotation={entity.rotation ?? [0, 0, 0]}
+      scale={entity.scale ?? [1, 1, 1]}
+      castShadow
+      receiveShadow
+    >
+      {geometry}
+      <meshStandardMaterial
+        color={color}
+        emissive={entity.type === 'light' ? color : '#000000'}
+        emissiveIntensity={entity.type === 'light' ? 2.0 : 0}
+        roughness={0.7}
+        metalness={entity.type === 'screen' ? 0.8 : 0.1}
+      />
+      {entity.label && (
+        <Text
+          position={[0, 0.4, 0]}
+          fontSize={0.12}
+          color="#ffffff"
+          anchorX="center"
+          anchorY="middle"
+        >
+          {entity.label}
+        </Text>
+      )}
+    </mesh>
+  )
+}
+
+function DynamicEntityRenderer({ entities }: { entities: WorkshopEntity[] }) {
+  return (
+    <>
+      {entities.map(entity => (
+        <EntityMesh key={entity.id} entity={entity} />
+      ))}
+    </>
+  )
+}
 const AmbientHealthLight: React.FC<{ status: HealthStatus }> = ({ status }) => {
   const ambRef = useRef<THREE.AmbientLight>(null)
   const targetColor = useRef(new THREE.Color(HEALTH_COLORS[status]))
@@ -417,7 +497,7 @@ const WorkshopHUD: React.FC<HUDProps> = ({
 
         {xrSupported && (
           <button
-            onClick={onEnterVR}
+            onClick={() => xrStore.enterVR()}
             className="flex items-center space-x-2 px-5 py-3 rounded-xl font-mono text-sm font-bold tracking-wider bg-indigo-700/40 border border-indigo-500/60 text-indigo-300 hover:bg-indigo-600/50 transition-all shadow-lg shadow-indigo-900/30"
           >
             <span className="material-icons-outlined text-base">vrpanos</span>
@@ -444,13 +524,11 @@ const WorkshopScene: React.FC<{
   entities: WorkshopEntity[]
   health: HealthStatus
 }> = ({ entities, health }) => (
-  <>
+  <XR store={xrStore}>
     <AmbientHealthLight status={health} />
     <WorkshopFloor />
     <HughPresence />
-    {entities.map(entity => (
-      <WorkshopEntity3D key={entity.id} entity={entity} />
-    ))}
+    <DynamicEntityRenderer entities={entities} />
     <OrbitControls
       enablePan
       enableZoom
@@ -459,14 +537,27 @@ const WorkshopScene: React.FC<{
       maxDistance={30}
       target={[0, 0.5, 0]}
     />
-  </>
+  </XR>
 )
 
 // ─── Main Workshop component ──────────────────────────────────────────────────
 
-export const Workshop: React.FC = () => {
-  const [entities, addEntity] = useWorkshopEntities()
-  const env = useWorkshopEnvironment()
+// ─── Main Workshop inner component (requires ConvexProvider) ─────────────────
+
+const WorkshopInner: React.FC = () => {
+  // ── Convex real-time sync ────────────────────────────────────────────────────
+  const convexEntities = useConvexWorkshopEntities()
+  const env = useConvexEnvironment()
+  const upsertEntity = useMutation(workshopApi.upsertWorkshopEntity)
+
+  // ── Local optimistic state ───────────────────────────────────────────────────
+  const [localEntities, setLocalEntities] = useState<WorkshopEntity[]>([])
+  // Merge: show local entities not yet reflected in Convex (optimistic UI)
+  const entities = useMemo(() => {
+    const convexIds = new Set(convexEntities.map(e => e.id))
+    return [...convexEntities, ...localEntities.filter(e => !convexIds.has(e.id))]
+  }, [convexEntities, localEntities])
+
   const [xrSupported, setXrSupported] = useState(false)
   const [voice, setVoice] = useState<VoiceState>({
     isListening: false,
@@ -488,25 +579,49 @@ export const Workshop: React.FC = () => {
     }
   }, [])
 
-  // Spawn entity from parsed voice command
-  const spawnEntity = useCallback((partial: Partial<WorkshopEntity>) => {
+  // Spawn entity: optimistic local add + Convex mutation
+  const spawnEntity = useCallback(async (partial: Partial<WorkshopEntity>) => {
     const id = `entity-${Date.now()}-${entityCountRef.current++}`
     const angle = Math.random() * Math.PI * 2
     const radius = 1.5 + Math.random() * 3
+    const spawnPosition: [number, number, number] = [
+      Math.cos(angle) * radius,
+      0,
+      Math.sin(angle) * radius,
+    ]
+    const entityType = partial.type ?? 'box'
     const entity: WorkshopEntity = {
       id,
-      type: partial.type ?? 'box',
-      position: [
-        Math.cos(angle) * radius,
-        0,
-        Math.sin(angle) * radius,
-      ],
+      type: entityType,
+      position: spawnPosition,
       color: partial.color,
-      label: partial.type?.toUpperCase(),
+      label: entityType.toUpperCase(),
       createdAt: Date.now(),
     }
-    addEntity(entity)
-  }, [addEntity])
+    // Optimistic: add to local state immediately
+    setLocalEntities(prev => [...prev, entity])
+
+    // Persist to Convex; map box/sphere/plane → 'custom' (schema constraint)
+    const convexType = (['box', 'sphere', 'plane'] as string[]).includes(entityType)
+      ? 'custom'
+      : entityType as 'table' | 'chair' | 'screen' | 'light' | 'custom'
+    try {
+      await upsertEntity({
+        entityId: id,
+        type: convexType,
+        label: entity.label ?? entityType.toUpperCase(),
+        positionX: spawnPosition[0],
+        positionY: spawnPosition[1],
+        positionZ: spawnPosition[2],
+        rotationX: 0, rotationY: 0, rotationZ: 0,
+        scaleX: 1, scaleY: 1, scaleZ: 1,
+        color: partial.color ?? '#888888',
+        visible: true,
+      })
+    } catch (e) {
+      console.warn('[Workshop] Convex upsert failed:', e)
+    }
+  }, [upsertEntity])
 
   // Voice recognition
   const startListening = useCallback(() => {
@@ -561,21 +676,6 @@ export const Workshop: React.FC = () => {
     else startListening()
   }, [voice.isListening, startListening, stopListening])
 
-  // Enter VR via raw WebXR API
-  const handleEnterVR = useCallback(async () => {
-    if (!navigator.xr) return
-    try {
-      const session = await navigator.xr.requestSession('immersive-vr', {
-        requiredFeatures: ['local-floor'],
-        optionalFeatures: ['bounded-floor', 'hand-tracking'],
-      })
-      session.addEventListener('end', () => console.log('[Workshop] XR session ended'))
-      console.log('[Workshop] XR session started:', session)
-    } catch (e) {
-      console.warn('[Workshop] Failed to start XR session:', e)
-    }
-  }, [])
-
   // Cleanup on unmount
   useEffect(() => () => { recognitionRef.current?.stop() }, [])
 
@@ -596,7 +696,7 @@ export const Workshop: React.FC = () => {
           entities={entities}
           xrSupported={xrSupported}
           onVoiceToggle={handleVoiceToggle}
-          onEnterVR={handleEnterVR}
+          onEnterVR={() => xrStore.enterVR()}
         />
       </div>
     )
@@ -612,7 +712,7 @@ export const Workshop: React.FC = () => {
           entities={entities}
           xrSupported={xrSupported}
           onVoiceToggle={handleVoiceToggle}
-          onEnterVR={handleEnterVR}
+          onEnterVR={() => xrStore.enterVR()}
         />
       </div>
 
@@ -636,5 +736,13 @@ export const Workshop: React.FC = () => {
     </div>
   )
 }
+
+// ─── Workshop export — self-contained ConvexProvider wrapper ──────────────────
+
+export const Workshop: React.FC = () => (
+  <ConvexProvider client={convexClient}>
+    <WorkshopInner />
+  </ConvexProvider>
+)
 
 export default Workshop
