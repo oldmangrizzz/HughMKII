@@ -1,3 +1,9 @@
+// SovereignPanel.tsx — Liquid glass panel wrapper for Workshop content sections
+// Applies SVG displacement filter at edges, hue-rotating backdrop-filter,
+// chromatic aberration on titles, and 0.28 opacity glass effect.
+// All styling lives in symbiote.css (.sovereign-panel-*).
+// Wraps any content section; pass isActive=false to render children unwrapped.
+
 import React from 'react'
 
 interface SovereignPanelProps {

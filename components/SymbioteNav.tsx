@@ -1,3 +1,8 @@
+// SymbioteNav.tsx — Full-panel mode navigation overlay (legacy/alternate to TopNav)
+// Icon-glyph based nav with section headers. Rendered as a slide-in panel.
+// Kept alongside TopNav — TopNav is the primary ghost nav; SymbioteNav for deeper navigation.
+// Connects to: App.tsx setMode, AppMode enum in types.ts.
+
 import React from 'react'
 import { AppMode } from '../types'
 

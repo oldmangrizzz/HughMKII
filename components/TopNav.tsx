@@ -1,3 +1,9 @@
+// TopNav.tsx — Ghost navigation bar for the Workshop
+// Only appears when the mouse enters the top 80px of the viewport.
+// Auto-hides after 1.2s of inactivity. Active mode shows a 60vh drop-line into content.
+// No persistent sidebar — visibility is purely proximity-triggered.
+// Connects to: App.tsx setMode, AppMode enum in types.ts.
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { AppMode } from '../types'
 

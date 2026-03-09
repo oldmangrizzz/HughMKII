@@ -1,3 +1,10 @@
+// CliffordField.tsx — The Workshop environment itself, not a UI element
+// Renders 500 continuous energy stream lines tracing the Clifford attractor.
+// Attractor parameters drift between 4 presets (butterfly/lightning/spiral/vortex) every 30s.
+// Color hue shifts per active AppMode. Camera has mouse-driven parallax — you're inside the field.
+// Connects to: App.tsx (receives AppMode), Three.js BufferGeometry (LineSegments, not particles).
+// Performance note: LINE_COUNT=500, LINE_LENGTH=100 — keep geometry instanced, avoid per-frame allocations.
+
 import React, { useMemo, useRef, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'

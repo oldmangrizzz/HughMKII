@@ -1,3 +1,10 @@
+// VoicePortal.tsx — Primary interaction surface for the Workshop
+// Horizontal energy line at screen bottom. Space bar or click activates.
+// Chains Web Speech API (SpeechRecognition) + AudioContext for live waveform visualization.
+// Falls back to text input when mic is denied or speech API unavailable.
+// Connects to: App.tsx onSubmit handler → H.U.G.H. runtime API.
+// Gotcha: SpeechRecognition is webkit-prefixed; check browser support before enabling.
+
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 
 interface VoicePortalProps {

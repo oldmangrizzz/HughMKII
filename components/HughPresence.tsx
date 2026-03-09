@@ -1,3 +1,9 @@
+// HughPresence.tsx — H.U.G.H. locus orb in upper-right of the Workshop
+// Drifting orb that pulses to reflect H.U.G.H.'s actual operational health.
+// Polls api.grizzlymedicine.icu/health every 10s; dims red when offline.
+// Exports useHughStatus() hook — reusable across iOS/macOS native via HTTP.
+// Connects to: Workshop layout (positioned fixed), H.U.G.H. VPS health endpoint.
+
 import React, { useState, useEffect, useRef } from 'react'
 
 export interface HughStatus {
