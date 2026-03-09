@@ -35,6 +35,7 @@ export const Navigation: React.FC<NavProps> = ({ currentMode, setMode }) => {
 
       <nav className="space-y-1 flex-1 overflow-y-auto">
         <div className="text-[10px] font-bold text-gray-600 px-4 mb-2 uppercase tracking-widest">Command</div>
+        <NavItem mode={AppMode.HOTL_DASHBOARD} icon="radar" label="Command Center" current={currentMode} onClick={setMode} />
         <NavItem mode={AppMode.DASHBOARD} icon="account_tree" label="Mission Control" current={currentMode} onClick={setMode} />
         <NavItem mode={AppMode.CHAT} icon="chat" label="Comms Link" current={currentMode} onClick={setMode} />
         <NavItem mode={AppMode.HOME_CONTROL} icon="home_iot_device" label="Habitat Control" current={currentMode} onClick={setMode} />
@@ -48,6 +49,9 @@ export const Navigation: React.FC<NavProps> = ({ currentMode, setMode }) => {
         <div className="pt-4 mt-4 border-t border-grizzly-800">
            <NavItem mode={AppMode.LIVE} icon="graphic_eq" label="Live Link" current={currentMode} onClick={setMode} />
            <NavItem mode={AppMode.SYSTEM} icon="settings_suggest" label="Architecture" current={currentMode} onClick={setMode} />
+           <div className="mt-3">
+             <NavItem mode={AppMode.WORKSHOP} icon="view_in_ar" label="Workshop ✦ VR" current={currentMode} onClick={setMode} />
+           </div>
         </div>
       </nav>
 

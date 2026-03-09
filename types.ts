@@ -7,7 +7,9 @@ export enum AppMode {
   LIVE = 'LIVE',
   SYSTEM = 'SYSTEM',
   HOME_CONTROL = 'HOME_CONTROL', // Home Assistant
-  SITUATIONAL_AWARENESS = 'SITUATIONAL_AWARENESS' // Mapbox
+  SITUATIONAL_AWARENESS = 'SITUATIONAL_AWARENESS', // Mapbox
+  WORKSHOP = 'WORKSHOP', // WebXR 3D spatial environment
+  HOTL_DASHBOARD = 'HOTL_DASHBOARD', // Human-On-The-Loop operator monitoring
 }
 
 export enum GeminiModel {

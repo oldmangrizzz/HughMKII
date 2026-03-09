@@ -1,13 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { GeminiModel } from '../types';
+import { useLFMVoice } from '../services/useLFMVoice';
+
+const HUGH_SYSTEM_PROMPT = "You are H.U.G.H., a grizzly bear Guardian system. You have somatic awareness, dialectical reasoning, and deep loyalty to Grizz. You can see what the operator sees and hear them. Respond with presence and tactical clarity.";
 
 export const LiveSession: React.FC = () => {
   const [connected, setConnected] = useState(false);
   const [log, setLog] = useState<string[]>([]);
+  const [lfmMode, setLfmMode] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sessionRef = useRef<any>(null); // Keep session instance
+  const sessionRef = useRef<any>(null);
+
+  const {
+    isListening,
+    isSpeaking,
+    transcription,
+    response: lfmResponse,
+    latencyMs,
+    error: lfmError,
+    isAvailable: lfmAvailable,
+    startListening,
+    stopListening,
+  } = useLFMVoice(HUGH_SYSTEM_PROMPT);
   
   // Audio Contexts
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -178,20 +194,96 @@ export const LiveSession: React.FC = () => {
                 <p className="text-gray-400">Speak naturally. OmniVis sees and hears you in real-time.</p>
             </div>
 
+            {/* LFM Voice Mode toggle */}
+            <div className="flex items-center justify-between bg-gray-800/40 rounded-xl px-4 py-3 border border-gray-700">
+              <div className="flex items-center space-x-3">
+                <div className={`w-2 h-2 rounded-full ${lfmAvailable ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+                <div>
+                  <span className="text-sm font-mono text-gray-300">LFM Voice Mode</span>
+                  <p className="text-[10px] text-gray-600 font-mono">LFM 2.5-Audio — sub-100ms speech-to-speech</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setLfmMode(v => !v)}
+                className={`relative w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none ${
+                  lfmMode ? 'bg-blue-600' : 'bg-gray-700'
+                }`}
+                aria-label="Toggle LFM Voice Mode"
+              >
+                <span
+                  className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
+                    lfmMode ? 'translate-x-7' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* LFM active panel */}
+            {lfmMode && (
+              <div className="bg-gray-800/50 rounded-xl border border-blue-800/40 p-4 space-y-3">
+                <div className="font-mono text-xs text-blue-400 uppercase tracking-widest mb-1">LFM 2.5 Voice Active</div>
+                {transcription && (
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-mono">YOU:</span>
+                    <p className="text-sm text-gray-200 mt-0.5">{transcription}</p>
+                  </div>
+                )}
+                {lfmResponse && (
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-mono">H.U.G.H.:</span>
+                    <p className="text-sm text-blue-200 mt-0.5">{lfmResponse}</p>
+                  </div>
+                )}
+                {latencyMs !== null && (
+                  <p className="text-[10px] text-gray-600 font-mono">⚡ {latencyMs}ms</p>
+                )}
+                {lfmError && (
+                  <p className="text-[10px] text-red-400 font-mono">{lfmError}</p>
+                )}
+                <div className="flex space-x-3 pt-1">
+                  {!isListening ? (
+                    <button
+                      onClick={startListening}
+                      disabled={isSpeaking}
+                      className="flex-1 bg-blue-700 hover:bg-blue-600 text-white font-bold py-3 rounded-xl font-mono text-sm transition-all disabled:opacity-40"
+                    >
+                      🎙 Hold to Speak
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopListening}
+                      className="flex-1 bg-red-700 hover:bg-red-600 text-white font-bold py-3 rounded-xl font-mono text-sm transition-all animate-pulse"
+                    >
+                      ⏹ Release to Send
+                    </button>
+                  )}
+                  {isSpeaking && (
+                    <div className="flex items-center px-3 text-blue-400 font-mono text-xs animate-pulse">
+                      ♫ Speaking…
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="bg-gray-800/50 p-4 rounded-lg font-mono text-sm text-green-400 h-32 overflow-y-auto border border-gray-700">
                 {log.map((l, i) => <div key={i}>{l}</div>)}
                 {log.length === 0 && <span className="text-gray-600">Waiting for connection...</span>}
             </div>
 
             <div className="flex space-x-4">
-                {!connected ? (
-                    <button onClick={startSession} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all">
-                        Connect Live
-                    </button>
-                ) : (
-                    <button onClick={stopSession} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl shadow-lg transition-all">
-                        End Session
-                    </button>
+                {!lfmMode && (
+                  <>
+                    {!connected ? (
+                        <button onClick={startSession} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all">
+                            Connect Live
+                        </button>
+                    ) : (
+                        <button onClick={stopSession} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl shadow-lg transition-all">
+                            End Session
+                        </button>
+                    )}
+                  </>
                 )}
             </div>
         </div>

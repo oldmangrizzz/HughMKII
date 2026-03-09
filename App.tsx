@@ -8,6 +8,8 @@ import { LiveSession } from './components/LiveSession';
 import { SystemMod } from './components/SystemMod';
 import { HomeControl } from './components/HomeControl';
 import { MapboxView } from './components/MapboxView';
+import { Workshop } from './components/Workshop';
+import { HOTLDashboard } from './components/HOTLDashboard';
 import { AppMode } from './types';
 
 const App: React.FC = () => {
@@ -23,6 +25,8 @@ const App: React.FC = () => {
       case AppMode.SYSTEM: return <SystemMod />;
       case AppMode.HOME_CONTROL: return <HomeControl />;
       case AppMode.SITUATIONAL_AWARENESS: return <MapboxView />;
+      case AppMode.WORKSHOP: return <Workshop />;
+      case AppMode.HOTL_DASHBOARD: return <HOTLDashboard />;
       case AppMode.ANALYZER: return <div className="p-8 text-gray-500">Analyzer Module Loading...</div>;
       default: return <Dashboard />;
     }
