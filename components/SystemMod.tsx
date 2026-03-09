@@ -3,16 +3,20 @@ import { SOUL_ANCHOR } from '../services/soul';
 import { SystemConfig } from '../types';
 import { checkOllamaConnection } from '../services/ollamaService';
 import { fetchHAStates } from '../services/homeAssistant';
+import { getConfig } from '../services/config';
 
 export const SystemMod: React.FC = () => {
-    const [config, setConfig] = useState<SystemConfig>({
-        ollamaUrl: 'http://localhost:11434',
-        homeAssistantUrl: 'http://Jarvis.grizzlymedicine.icu',
-        homeAssistantToken: '',
-        mapboxToken: '',
-        useLocalLlm: false,
-        useSpinalCord: false,
-        spinalCordUrl: 'http://localhost:4000'
+    const [config, setConfig] = useState<SystemConfig>(() => {
+        const cfg = getConfig();
+        return {
+            ollamaUrl: cfg.ollamaUrl ?? '',
+            homeAssistantUrl: cfg.homeAssistantUrl ?? '/api/ha',
+            homeAssistantToken: cfg.homeAssistantToken ?? '',
+            mapboxToken: cfg.mapboxToken ?? '',
+            useLocalLlm: cfg.useLocalLlm ?? true,
+            useSpinalCord: cfg.useSpinalCord ?? false,
+            spinalCordUrl: cfg.spinalCordUrl ?? '',
+        };
     });
     
     const [status, setStatus] = useState({
@@ -24,12 +28,6 @@ export const SystemMod: React.FC = () => {
     const [testMsg, setTestMsg] = useState('');
 
     useEffect(() => {
-        const saved = localStorage.getItem('hugh_system_config');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            // Merge with default to handle new fields
-            setConfig(prev => ({ ...prev, ...parsed }));
-        }
         checkConnectivity();
     }, []);
 

@@ -1,48 +1,38 @@
-import { SystemConfig } from "../types";
-
-const getConfig = (): SystemConfig => {
-    return JSON.parse(localStorage.getItem('hugh_system_config') || '{}');
-};
+import { getConfig } from './config'
 
 export const fetchHAStates = async () => {
-    const config = getConfig();
-    if (!config.homeAssistantUrl || !config.homeAssistantToken) return [];
-
-    try {
-        const response = await fetch(`${config.homeAssistantUrl}/api/states`, {
-            headers: {
-                'Authorization': `Bearer ${config.homeAssistantToken}`,
-                'Content-Type': 'application/json',
-            },
-        });
-        if (!response.ok) {
-            console.warn(`[H.U.G.H. HA Link] Fetch failed with status: ${response.status}`);
-            return [];
-        }
-        return await response.json();
-    } catch (e) {
-        console.error("[H.U.G.H. HA Link] Connection Error (Check CORS/Network):", e);
-        return [];
+  try {
+    const res = await fetch('/api/ha/api/states')
+    if (!res.ok) {
+      console.warn('[HA] fetch failed:', res.status)
+      return []
     }
-};
+    return await res.json()
+  } catch (e) {
+    console.error('[HA] fetch failed:', e)
+    return []
+  }
+}
 
-export const callHAService = async (domain: string, service: string, entity_id: string) => {
-    const config = getConfig();
-    if (!config.homeAssistantUrl || !config.homeAssistantToken) return;
-
-    try {
-        const response = await fetch(`${config.homeAssistantUrl}/api/services/${domain}/${service}`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${config.homeAssistantToken}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ entity_id }),
-        });
-        if (!response.ok) {
-            console.warn(`[H.U.G.H. HA Link] Service call failed: ${response.status}`);
-        }
-    } catch (e) {
-        console.error("[H.U.G.H. HA Link] Service Call Error:", e);
+export const callHAService = async (
+  domain: string,
+  service: string,
+  entity_id: string,
+  data?: Record<string, unknown>
+) => {
+  try {
+    const res = await fetch(`/api/ha/api/services/${domain}/${service}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity_id, ...data }),
+    })
+    if (!res.ok) {
+      console.warn('[HA] service call failed:', res.status)
     }
-};
+  } catch (e) {
+    console.error('[HA] service call failed:', e)
+  }
+}
+
+// Keep legacy config export so old imports don't break
+export { getConfig }

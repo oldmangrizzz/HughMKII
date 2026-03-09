@@ -421,21 +421,65 @@ export const HOTLDashboard: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchAll = useCallback(async () => {
-    const [audit, somatic, servers, comms] = await Promise.all([
-      convexQuery<HOTLEntry[]>('hotlAuditLog:list'),
-      convexQuery<SomaticEvent[]>('somaticTelemetry:list'),
-      convexQuery<ServerNode[]>('serverHealth:list'),
-      convexQuery<AgentComm[]>('agentComms:list'),
+  const fetchNodeHealth = useCallback(async (): Promise<ServerNode[]> => {
+    const t0 = Date.now();
+
+    const [hughRes, inferenceRes, haRes] = await Promise.allSettled([
+      fetch('https://api.grizzlymedicine.icu/health', { signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null),
+      fetch('/api/inference/health', { signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null),
+      fetch('/api/ha/api/states', { signal: AbortSignal.timeout(5000) }).then(r => r.ok ? r.json() : null),
     ]);
 
-    const anyLive = !!(audit || somatic || servers || comms);
-    setIsConnected(anyLive);
+    const latency = Date.now() - t0;
+
+    return [
+      {
+        id: 'hugh-api',
+        nodeName: 'hugh-api',
+        cpu: 0,
+        memory: 0,
+        latencyMs: latency,
+        status: hughRes.status === 'fulfilled' && hughRes.value ? 'online' : 'offline',
+        lastSeen: Date.now(),
+      },
+      {
+        id: 'lfm-inference',
+        nodeName: 'lfm-inference',
+        cpu: 0,
+        memory: 0,
+        latencyMs: latency,
+        status: inferenceRes.status === 'fulfilled' && inferenceRes.value ? 'online' : 'offline',
+        lastSeen: Date.now(),
+      },
+      {
+        id: 'home-assistant',
+        nodeName: 'home-assistant',
+        cpu: 0,
+        memory: 0,
+        latencyMs: latency,
+        status: haRes.status === 'fulfilled' && haRes.value ? 'online' : 'offline',
+        lastSeen: Date.now(),
+      },
+    ];
+  }, []);
+
+  const fetchAll = useCallback(async () => {
+    const [audit, somatic, comms, liveNodes] = await Promise.all([
+      convexQuery<HOTLEntry[]>('hotlAuditLog:list'),
+      convexQuery<SomaticEvent[]>('somaticTelemetry:list'),
+      convexQuery<AgentComm[]>('agentComms:list'),
+      fetchNodeHealth(),
+    ]);
+
+    // Node health is always real
+    setServerHealth(liveNodes);
+    const anyHotlLive = !!(audit || somatic || comms);
+    setIsConnected(anyHotlLive || liveNodes.some(n => n.status === 'online'));
+
     if (audit?.length) setAuditLog(audit);
     if (somatic?.length) setSomaticEvents(somatic);
-    if (servers?.length) setServerHealth(servers);
     if (comms?.length) setAgentComms(comms);
-  }, []);
+  }, [fetchNodeHealth]);
 
   useEffect(() => {
     fetchAll();

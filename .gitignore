@@ -35,3 +35,7 @@ xcuserdata/
 DerivedData/
 files.txt
 .opencode/
+mcp_agent.secrets.yaml
+*secrets*.yaml
+*.secrets.yaml
+HughMK1/.env/

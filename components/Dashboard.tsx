@@ -1,145 +1,186 @@
-import React, { useState } from 'react';
-import { generateMap } from '../services/geminiService';
-import { MapData, MapNode } from '../types';
+import React, { useState, useEffect, useCallback } from 'react';
+
+interface NodeStatus {
+  name: string;
+  status: 'online' | 'degraded' | 'offline' | 'unknown';
+  detail: string;
+  latencyMs?: number;
+}
+
+interface HASummary {
+  totalEntities: number;
+  lightsOn: number;
+  lightsOff: number;
+  sensors: number;
+  unavailable: number;
+}
 
 export const Dashboard: React.FC = () => {
-    const [prompt, setPrompt] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [mapData, setMapData] = useState<MapData | null>(null);
+  const [nodes, setNodes] = useState<NodeStatus[]>([]);
+  const [haSummary, setHASummary] = useState<HASummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-    const handleMap = async () => {
-        if (!prompt) return;
-        setLoading(true);
-        try {
-            const data = await generateMap(prompt);
-            setMapData(data);
-        } catch (e) {
-            console.error(e);
-        }
-        setLoading(false);
-    };
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
 
-    const handleMic = () => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            const recognition = new SpeechRecognition();
-            recognition.onresult = (event: any) => {
-                setPrompt(event.results[0][0].transcript);
-            };
-            recognition.start();
-        } else {
-            alert("Voice input not supported in this browser.");
-        }
-    };
+    // Fetch in parallel
+    const [hughHealth, inferenceHealth, haStates] = await Promise.allSettled([
+      fetch('https://api.grizzlymedicine.icu/health', { signal: AbortSignal.timeout(5000) })
+        .then(r => r.ok ? r.json() : Promise.reject(r.status)),
+      fetch('/api/inference/health', { signal: AbortSignal.timeout(5000) })
+        .then(r => r.ok ? r.json() : Promise.reject(r.status)),
+      fetch('/api/ha/api/states', { signal: AbortSignal.timeout(8000) })
+        .then(r => r.ok ? r.json() : Promise.reject(r.status)),
+    ]);
 
-    // --- Renderers ---
+    const updatedNodes: NodeStatus[] = [
+      {
+        name: 'H.U.G.H. API',
+        status: hughHealth.status === 'fulfilled' ? 'online' : 'offline',
+        detail: hughHealth.status === 'fulfilled'
+          ? `v${hughHealth.value?.version ?? '?'} — ${hughHealth.value?.status ?? 'ok'}`
+          : 'api.grizzlymedicine.icu unreachable',
+      },
+      {
+        name: 'LFM Inference',
+        status: inferenceHealth.status === 'fulfilled' ? 'online' : 'offline',
+        detail: inferenceHealth.status === 'fulfilled'
+          ? `${inferenceHealth.value?.status ?? 'running'}`
+          : 'Inference node unreachable',
+      },
+      {
+        name: 'Home Assistant',
+        status: haStates.status === 'fulfilled' ? 'online' : 'offline',
+        detail: haStates.status === 'fulfilled'
+          ? `${(haStates.value as any[]).length} entities loaded`
+          : 'HA tunnel not active',
+      },
+    ];
 
-    const renderTimeline = (nodes: MapNode[]) => (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {nodes.sort((a,b) => (a.step || 0) - (b.step || 0)).map((node, i) => (
-                <div key={node.id} className="min-h-[120px] p-4 rounded-xl border border-gray-800 bg-gray-900/50 relative group hover:border-blue-500/30 transition-all">
-                    <span className="absolute top-3 right-4 text-2xl font-bold text-gray-700 select-none group-hover:text-blue-500/20">
-                        {node.step || i + 1}
-                    </span>
-                    <div className="mb-2">
-                        <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500 text-white">
-                            {node.category}
-                        </span>
-                    </div>
-                    <h4 className="font-semibold text-white text-sm mb-1">{node.label}</h4>
-                    <p className="text-xs text-gray-400">{node.description}</p>
-                </div>
-            ))}
+    setNodes(updatedNodes);
+
+    if (haStates.status === 'fulfilled') {
+      const states = haStates.value as Array<{ entity_id: string; state: string }>;
+      const lights = states.filter(e => e.entity_id.startsWith('light.'));
+      setHASummary({
+        totalEntities: states.length,
+        lightsOn: lights.filter(l => l.state === 'on').length,
+        lightsOff: lights.filter(l => l.state === 'off').length,
+        sensors: states.filter(e => e.entity_id.startsWith('sensor.')).length,
+        unavailable: states.filter(e => e.state === 'unavailable').length,
+      });
+    }
+
+    setLastRefresh(new Date());
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
+  const statusColor: Record<NodeStatus['status'], string> = {
+    online: 'text-emerald-400',
+    degraded: 'text-amber-400',
+    offline: 'text-red-400',
+    unknown: 'text-gray-500',
+  };
+  const statusDot: Record<NodeStatus['status'], string> = {
+    online: 'bg-emerald-400',
+    degraded: 'bg-amber-400 animate-pulse',
+    offline: 'bg-red-500',
+    unknown: 'bg-gray-600',
+  };
+
+  return (
+    <div className="h-full p-8 overflow-y-auto">
+      <header className="mb-8 flex items-center justify-between">
+        <div>
+          <h2 className="text-4xl font-bold text-white mb-2">Mission Control</h2>
+          <p className="text-gray-400 font-mono text-sm">
+            {lastRefresh ? `Last sync: ${lastRefresh.toLocaleTimeString()}` : 'Initializing...'}
+          </p>
         </div>
-    );
+        <button
+          onClick={fetchAll}
+          disabled={loading}
+          className="px-4 py-2 border border-grizzly-700 rounded-lg text-sm text-gray-400 hover:text-white hover:border-highland-500 transition-all font-mono disabled:opacity-50"
+        >
+          {loading ? '↻ Refreshing...' : '↻ Refresh'}
+        </button>
+      </header>
 
-    const renderProcess = (nodes: MapNode[]) => (
-        <div className="flex flex-col space-y-4 max-w-2xl mx-auto">
-            {nodes.sort((a,b) => (a.step || 0) - (b.step || 0)).map((node, i) => (
-                <div key={node.id} className="relative pl-8 border-l-2 border-gray-800 hover:border-blue-500 transition-colors pb-6 last:pb-0">
-                    <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-blue-600 border-4 border-gray-900"></div>
-                    <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700">
-                        <div className="flex justify-between items-start mb-2">
-                            <h4 className="font-bold text-white text-lg">{node.label}</h4>
-                            <span className="text-xs font-mono text-gray-500 px-2 py-1 bg-gray-900 rounded">{node.category}</span>
-                        </div>
-                        <p className="text-gray-300">{node.description}</p>
-                    </div>
-                    {i < nodes.length - 1 && (
-                        <div className="absolute left-[-2px] bottom-[-10px] text-gray-800">▼</div>
-                    )}
-                </div>
-            ))}
-        </div>
-    );
-
-    const renderConcept = (nodes: MapNode[]) => (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {nodes.map((node) => (
-                <div key={node.id} className="bg-gray-800/40 p-6 rounded-2xl border border-gray-700 hover:bg-gray-800/80 transition-all hover:-translate-y-1">
-                    <div className="w-10 h-10 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center mb-4">
-                        <span className="material-icons-outlined text-xl">lightbulb</span>
-                    </div>
-                    <h4 className="font-bold text-white text-lg mb-2">{node.label}</h4>
-                    <span className="text-xs uppercase tracking-wider text-purple-400 mb-3 block">{node.category}</span>
-                    <p className="text-sm text-gray-400 leading-relaxed">{node.description}</p>
-                </div>
-            ))}
-        </div>
-    );
-
-    return (
-        <div className="h-full p-8 overflow-y-auto">
-            <header className="mb-8">
-                <h2 className="text-4xl font-bold text-white mb-2">Universal Mapper</h2>
-                <p className="text-gray-400">Literally map anything. Timelines, processes, physics concepts, or life plans.</p>
-            </header>
-
-            <div className="flex gap-4 mb-10 max-w-4xl">
-                <div className="flex-1 relative">
-                    <input 
-                        type="text" 
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="Try 'Map the physics of a curveball' or 'Plan a wedding timeline'"
-                        className="w-full bg-gray-900 border border-gray-700 rounded-xl pl-4 pr-12 py-4 text-white focus:outline-none focus:border-blue-500 shadow-lg text-lg"
-                        onKeyDown={(e) => e.key === 'Enter' && handleMap()}
-                    />
-                    <button onClick={handleMic} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-2">
-                        <span className="material-icons-outlined">mic</span>
-                    </button>
-                </div>
-                <button 
-                    onClick={handleMap}
-                    disabled={loading}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-blue-900/30 disabled:opacity-50"
-                >
-                    {loading ? (
-                        <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    ) : "Map It"}
-                </button>
+      {/* Node Status Grid */}
+      <section className="mb-10">
+        <h3 className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-4">
+          Infrastructure Nodes
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {nodes.map((node) => (
+            <div
+              key={node.name}
+              className="bg-grizzly-800/50 border border-grizzly-700 rounded-xl p-5 hover:border-highland-500/30 transition-all"
+            >
+              <div className="flex items-center space-x-2 mb-3">
+                <div className={`w-2 h-2 rounded-full ${statusDot[node.status]}`}></div>
+                <span className={`text-xs font-mono font-bold uppercase ${statusColor[node.status]}`}>
+                  {node.status}
+                </span>
+              </div>
+              <h4 className="text-white font-bold mb-1">{node.name}</h4>
+              <p className="text-xs text-gray-500 font-mono">{node.detail}</p>
             </div>
+          ))}
 
-            {/* Output Area */}
-            {mapData ? (
-                <div className="animate-fade-in-up">
-                    <div className="flex items-center space-x-4 mb-6">
-                        <h3 className="text-2xl font-bold text-white">{mapData.title}</h3>
-                        <span className="px-3 py-1 rounded-full border border-gray-700 text-xs font-mono uppercase text-gray-400">
-                            TYPE: {mapData.type}
-                        </span>
-                    </div>
-                    
-                    {mapData.type === 'timeline' && renderTimeline(mapData.nodes)}
-                    {mapData.type === 'process' && renderProcess(mapData.nodes)}
-                    {mapData.type === 'concept' && renderConcept(mapData.nodes)}
-                </div>
-            ) : (
-                <div className="text-center py-20 opacity-50">
-                    <span className="material-icons-outlined text-8xl text-gray-700 mb-4">explore</span>
-                    <p className="text-gray-500 text-lg">Enter a prompt to generate a visual map.</p>
-                </div>
-            )}
+          {loading && nodes.length === 0 && [...Array(3)].map((_, i) => (
+            <div key={i} className="bg-grizzly-800/30 border border-grizzly-800 rounded-xl p-5 animate-pulse h-28"></div>
+          ))}
         </div>
-    );
+      </section>
+
+      {/* HA Summary */}
+      {haSummary && (
+        <section className="mb-10">
+          <h3 className="text-xs font-mono text-gray-500 uppercase tracking-widest mb-4">
+            Home Assistant Summary
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {[
+              { label: 'Total Entities', value: haSummary.totalEntities, color: 'text-gray-300' },
+              { label: 'Lights On', value: haSummary.lightsOn, color: 'text-amber-400' },
+              { label: 'Lights Off', value: haSummary.lightsOff, color: 'text-gray-500' },
+              { label: 'Sensors', value: haSummary.sensors, color: 'text-highland-400' },
+              { label: 'Unavailable', value: haSummary.unavailable, color: 'text-red-400' },
+            ].map(item => (
+              <div
+                key={item.label}
+                className="bg-grizzly-800/50 border border-grizzly-700 rounded-xl p-4 text-center"
+              >
+                <div className={`text-3xl font-bold font-mono ${item.color}`}>{item.value}</div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wider mt-1">{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* HA offline notice */}
+      {!haSummary && !loading && (
+        <section className="mb-10">
+          <div className="bg-grizzly-800/30 border border-grizzly-800 rounded-xl p-6 text-center">
+            <span className="material-icons-outlined text-3xl text-gray-700 mb-2 block">home</span>
+            <p className="text-gray-600 text-sm font-mono">
+              Home Assistant not reachable via /api/ha proxy.
+            </p>
+            <p className="text-gray-700 text-xs mt-1">
+              Requires Pangolin/Gerbil tunnel from HA host to VPS.
+            </p>
+          </div>
+        </section>
+      )}
+    </div>
+  );
 };
