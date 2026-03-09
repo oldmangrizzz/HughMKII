@@ -63,8 +63,9 @@ export class LFMService {
         ?? '',
       audioModel: config?.audioModel ?? 'lfm-2.5-audio-1.5b',
       thinkingModel: config?.thinkingModel ?? 'lfm-2.5-1.2b-thinking',
-      // TODO: Update this URL once Liquid AI publishes their public API endpoint
-      baseURL: config?.baseURL ?? 'https://api.liquid.ai/v1',
+      baseURL: config?.baseURL
+        ?? (typeof process !== 'undefined' ? process.env['VITE_INFERENCE_URL'] ?? process.env['INFERENCE_BASE_URL'] : undefined)
+        ?? 'http://localhost:8080',
     };
   }
 
