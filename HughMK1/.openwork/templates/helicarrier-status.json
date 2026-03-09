@@ -1,0 +1,7 @@
+{
+  "id": "helicarrier-status",
+  "title": "Helicarrier Status Check",
+  "description": "Check status of Proxmox infrastructure and deployed containers",
+  "prompt": "Check the status of the Helicarrier infrastructure. Review ~/workspace/helicarrier-deployment/ for the intended architecture, then help me understand what's currently deployed vs what should be deployed. Focus on Proxmox containers, Cloudflare tunnels, and Headscale status.",
+  "createdAt": 1737125400000
+}

@@ -33,3 +33,5 @@ HughMK1.worktrees/
 *.xcuserstate
 xcuserdata/
 DerivedData/
+files.txt
+.opencode/

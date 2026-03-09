@@ -1,0 +1,6 @@
+sentence-transformers
+spacy
+PyPDF2
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+convex

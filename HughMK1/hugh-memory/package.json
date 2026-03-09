@@ -1,0 +1,12 @@
+{
+  "name": "hugh-memory",
+  "version": "1.0.0",
+  "description": "HUGH distributed memory system",
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.14.0"
+  }
+}

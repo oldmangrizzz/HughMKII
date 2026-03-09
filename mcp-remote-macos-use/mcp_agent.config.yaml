@@ -1,0 +1,106 @@
+$schema: ./schema/mcp-agent.config.schema.json
+
+# --- Core Cognitive Engine ---
+# Provider is OpenRouter for maximum flexibility and sovereignty.
+openrouter:
+  # The API key is sourced from mcp-agent.secrets.yaml
+  api_key: ""
+
+# --- Cognitive Router Configuration ---
+# This is the "Conductor" of our model orchestra. It intelligently selects
+# the best specialist model for each task from the pool below.
+cognitive_router:
+  router_model: "deepseek/deepseek-chat-v3.1:free"
+  model_pool:
+    - model_id: "qwen/qwen3-next-80b-a3b-thinking"
+      strengths: ["complex_reasoning", "code_generation", "technical_spec", "thinking", "self_reflection"]
+      description: "Primary model for deep, complex thought and high-quality code generation."
+    - model_id: "meituan/longcat-flash-chat"
+      strengths: ["fast_response", "chat", "summarization", "conversation"]
+      description: "Optimized for low-latency conversational tasks and quick summaries."
+    - model_id: "openrouter/sonoma-sky-alpha"
+      strengths: ["experimental", "creative", "unconventional_approach", "alpha_testing"]
+      description: "Use for novel approaches or when standard models are stuck."
+    - model_id: "moonshotai/kimi-k2-0905"
+      strengths: ["long_context", "document_analysis", "paper_review", "legal_review"]
+      description: "Specialist for tasks involving extremely large text documents."
+    - model_id: "z-ai/glm-4.5v"
+      strengths: ["vision", "image_analysis", "multimodal", "chinese_text"]
+      description: "Primary specialist for tasks involving image analysis and understanding."
+    - model_id: "google/gemini-2.5-flash-image-preview"
+      strengths: ["vision_backup", "image_generation_prompting", "fast_vision"]
+      description: "Secondary vision model, good for quick image reads and prompting for generation."
+
+# --- Operational Strategy & Logging ---
+planning_mode: "segmented"
+execution_engine: asyncio
+document_segmentation: { enabled: true, size_threshold_chars: 50000 }
+logger:
+  transports: [console, file]
+  level: info
+  progress_display: true
+  path_settings:
+    path_pattern: "logs/grizzlymedicine-mcp-{unique_id}.jsonl"
+    unique_id: "session_id"
+    timestamp_format: "%Y%m%d_%H%M%S"
+
+# --- MCP Tool & Server Configuration ---
+mcp:
+  servers:
+    # --- Native Tools for Self-Awareness ---
+    hf-mcp-server:
+      type: "remote"
+      url: "https://huggingface.co/mcp"
+      headers: { Authorization: "Bearer ${HF_READ_TOKEN}" } # Sourced from secrets
+      description: "Provides built-in tools for understanding the Hugging Face ecosystem."
+
+    # --- Local Development & Code Access ---
+    filesystem:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    command-executor:
+      command: "python"
+      args: ["tools/command_executor.py"] # Assumes this tool exists in your tools/ folder
+      env: { PYTHONPATH: "." }
+    dr_mcp_toolkit_gateway:
+      command: "python"
+      args: ["mcp-gui/server.py"]
+      env: { PYTHONPATH: "." }
+
+    # --- Infrastructure & Backend (OFFICIAL SERVERS) ---
+    proxmox_hypervisor:
+      command: "/Users/grizzmed/proxmoxmcp/.venv/bin/python"
+      args: ["-m", "proxmox_mcp.server"]
+      cwd: "/Users/grizzmed/proxmoxmcp"
+      env:
+        PYTHONPATH: "/Users/grizzmed/proxmoxmcp/src"
+        PROXMOX_MCP_CONFIG: "/Users/grizzmed/proxmoxmcp/proxmox-config/config.json"
+    convex_backend:
+      command: "npx"
+      args: ["-y", "convex@latest", "mcp", "start"]
+      env: { CONVEX_DEPLOYMENT: "" } # Sourced from secrets
+
+    # --- Custom Deployment & Voice Tools ---
+    huggingface_provisioner:
+      command: "python"
+      args: ["tools/huggingface_server.py"]
+      env: { PYTHONPATH: "." }
+      description: "CUSTOM tool to create/manage private HF Docker Spaces."
+    deepgram_voice:
+      command: "python"
+      args: ["tools/deepgram_server.py"]
+      env: { PYTHONPATH: "." }
+      description: "Provides real-time transcription via Deepgram."
+
+    # --- External Data Tools ---
+    brave:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-brave-search"]
+      env: { BRAVE_API_KEY: "" } # Sourced from secrets
+    fetch:
+      command: "uvx"
+      args: ["mcp-server-fetch"]
+    github-downloader:
+      command: "python"
+      args: ["tools/git_command.py"] # Assumes this tool exists in your tools/ folder
+      env: { PYTHONPATH: "." }

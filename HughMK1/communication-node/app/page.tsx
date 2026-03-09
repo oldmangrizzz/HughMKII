@@ -1,0 +1,9 @@
+import ConsciousnessStream from "./components/ConsciousnessStream";
+
+export default function Home() {
+  return (
+    <main className="h-screen w-screen bg-black overflow-hidden">
+      <ConsciousnessStream />
+    </main>
+  );
+}

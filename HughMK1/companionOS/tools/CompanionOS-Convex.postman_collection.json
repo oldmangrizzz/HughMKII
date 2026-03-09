@@ -1,0 +1,128 @@
+{
+  "info": {
+    "name": "CompanionOS Convex",
+    "_postman_id": "b2f7c6b0-8b62-4af9-a0f1-2c2b2d98af01",
+    "description": "Queries & mutations for CompanionOS backend (Convex)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "queue:list",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "{{auth}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/query/queue:list",
+          "host": ["{{baseUrl}}"],
+          "path": ["query", "queue:list"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"me\"}"
+        }
+      }
+    },
+    {
+      "name": "queue:add",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "{{auth}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mutation/queue:add",
+          "host": ["{{baseUrl}}"],
+          "path": ["mutation", "queue:add"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"me\",\"source\":\"youtube\",\"originalURL\":\"https://www.youtube.com/watch?v=dQw4w9WgXcQ\",\"normalizedURL\":\"youtube://watch?v=dQw4w9WgXcQ\",\"videoId\":\"dQw4w9WgXcQ\",\"title\":\"Example\"}"
+        }
+      }
+    },
+    {
+      "name": "settings:get",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "{{auth}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/query/settings:get",
+          "host": ["{{baseUrl}}"],
+          "path": ["query", "settings:get"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"me\"}"
+        }
+      }
+    },
+    {
+      "name": "settings:setDefaultThread",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "{{auth}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mutation/settings:setDefaultThread",
+          "host": ["{{baseUrl}}"],
+          "path": ["mutation", "settings:setDefaultThread"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"me\",\"router\":\"gemini\",\"threadId\":\"inbox\"}"
+        }
+      }
+    },
+    {
+      "name": "chats:upsertThread",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "{{auth}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mutation/chats:upsertThread",
+          "host": ["{{baseUrl}}"],
+          "path": ["mutation", "chats:upsertThread"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"me\",\"router\":\"gemini\",\"threadId\":\"inbox\",\"name\":\"Inbox\"}"
+        }
+      }
+    },
+    {
+      "name": "chats:append",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "{{auth}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mutation/chats:append",
+          "host": ["{{baseUrl}}"],
+          "path": ["mutation", "chats:append"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"userId\":\"me\",\"threadId\":\"inbox\",\"router\":\"gemini\",\"role\":\"user\",\"text\":\"hello\"}"
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://YOUR.convex.cloud" },
+    { "key": "auth", "value": "YOUR_AUTH_TOKEN" }
+  ]
+}

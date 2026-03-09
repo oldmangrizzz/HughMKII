@@ -1,0 +1,12 @@
+{
+  "name": "hugh-core-convex",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy"
+  },
+  "devDependencies": {
+    "convex": "^1.14.0"
+  }
+}

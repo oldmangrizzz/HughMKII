@@ -1,0 +1,31 @@
+{
+  "name": "hughmk1",
+  "version": "1.0.0",
+  "description": "Hugh will be my own private version of J.A.R.V.I.S., Friday or E.D.I.T.H., fully integrated into mine and my family members lives, doing everything from \"real world real time safety monitoring\" to \"basic bullshit companion\"",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oldmangrizzz/HughMK1.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/oldmangrizzz/HughMK1/issues"
+  },
+  "homepage": "https://github.com/oldmangrizzz/HughMK1#readme",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.3.5",
+    "jest": "^30.2.0",
+    "js-yaml": "^4.1.1",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

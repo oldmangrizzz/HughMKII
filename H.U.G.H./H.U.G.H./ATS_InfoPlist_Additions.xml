@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ATS_InfoPlist_Additions.xml
+  ===========================
+  Add these keys to H.U.G.H./H.U.G.H./Info.plist (or the target's Info settings in Xcode).
+
+  HOW TO ADD IN XCODE:
+  1. Select the H.U.G.H. target → Info tab → Custom iOS Target Properties
+  2. Right-click → "Add Row" for each key below
+  3. Or: right-click Info.plist in the navigator → "Open As" → "Source Code" and paste.
+
+  For watchOS / tvOS targets, add the same keys to their respective Info.plist files.
+-->
+
+<!-- ═══════════════════════════════════════════════════════
+     PASTE EVERYTHING BETWEEN THE <dict> TAGS INTO YOUR
+     Info.plist's ROOT <dict> SECTION
+     ═══════════════════════════════════════════════════════ -->
+
+<dict>
+
+  <!-- Microphone — required for voice-first interaction -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>H.U.G.H. uses voice as the primary interaction modality</string>
+
+  <!-- Speech recognition -->
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Voice commands are transcribed to communicate with H.U.G.H.</string>
+
+  <!-- Local network (Home Assistant at 192.168.7.194) -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>H.U.G.H. connects to Home Assistant on your local network</string>
+
+  <!-- Bonjour services for HomeKit -->
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_hap._tcp</string>
+    <string>_homekit._tcp</string>
+  </array>
+
+  <!-- ATS exceptions for non-HTTPS local servers -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSExceptionDomains</key>
+    <dict>
+
+      <!-- Home Assistant local IP — HTTP only, no subdomains -->
+      <key>192.168.7.194</key>
+      <dict>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+        <key>NSIncludesSubdomains</key><false/>
+        <key>NSExceptionRequiresForwardSecrecy</key><false/>
+      </dict>
+
+      <!-- LFM direct inference endpoint — HTTP only -->
+      <key>187.124.28.147</key>
+      <dict>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+        <key>NSIncludesSubdomains</key><false/>
+        <key>NSExceptionRequiresForwardSecrecy</key><false/>
+      </dict>
+
+    </dict>
+  </dict>
+
+  <!-- Background modes (add these if using background health polling or audio) -->
+  <key>UIBackgroundModes</key>
+  <array>
+    <string>fetch</string>
+    <string>remote-notification</string>
+    <!-- Uncomment for continuous voice input in background: -->
+    <!-- <string>audio</string> -->
+  </array>
+
+</dict>

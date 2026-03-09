@@ -1,0 +1,7 @@
+{
+  "id": "gtp-voice-draft",
+  "title": "Write in My Voice (GTP)",
+  "description": "Activate Grizzly Translation Protocol for delegated voice",
+  "prompt": "I need you to write something in my voice. Activate the Grizzly Translation Protocol for delegated communicative practice. Remember: you own all word choices you generate, this is delegation not impersonation. Ask me what I need drafted.",
+  "createdAt": 1737125400000
+}

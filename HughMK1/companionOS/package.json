@@ -1,0 +1,13 @@
+{
+  "name": "companionos-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.2",
+    "convex": "latest",
+    "typescript": "5.5.4"
+  }
+}
