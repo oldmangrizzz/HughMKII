@@ -8,6 +8,17 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          // /api/vision → LFM 2.5-1.2B-Thinking on localhost:8080
+          // In dev: Vite proxies browser requests to the local inference server.
+          // In prod (workshop.grizzlymedicine.icu): add nginx location /api/vision
+          //   proxy_pass http://localhost:8080/v1/chat/completions;
+          '/api/vision': {
+            target: 'http://localhost:8080',
+            changeOrigin: true,
+            rewrite: () => '/v1/chat/completions',
+          },
+        },
       },
       plugins: [react()],
       define: {

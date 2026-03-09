@@ -1,23 +1,49 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense, useMemo } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Text, Grid, Environment } from '@react-three/drei'
-import { XR, createXRStore } from '@react-three/xr'
+import { XR, createXRStore, useXR, useXRHitTest } from '@react-three/xr'
 import { ConvexProvider, ConvexReactClient, useQuery, useMutation } from 'convex/react'
 import * as THREE from 'three'
 
-// ─── XR store (Quest 3 immersive-vr) ─────────────────────────────────────────
-const xrStore = createXRStore()
+// ─── XR store — single store supports both VR and AR entry ───────────────────
+// enterVR() → immersive-vr (opaque)
+// enterAR() → immersive-ar (Quest 3 passthrough / mixed reality)
+// All optional features declared so the browser can negotiate them per mode.
+const xrStore = createXRStore({
+  sessionInit: {
+    optionalFeatures: [
+      'local-floor',
+      'bounded-floor',
+      'hand-tracking',
+      'layers',
+      'depth-sensing',
+      'camera-access',
+      'hit-test',
+      'anchors',
+      'dom-overlay',
+    ],
+    depthSensing: {
+      usagePreference: ['cpu-optimized'],
+      dataFormatPreference: ['luminance-alpha'],
+    },
+  } as XRSessionInit,
+})
+
+// arStore is an alias so the HUD can call arStore.enterAR() — same underlying store
+const arStore = xrStore
 
 // ─── Convex client ────────────────────────────────────────────────────────────
 const convexClient = new ConvexReactClient(
   (import.meta.env as any).VITE_CONVEX_URL ?? 'https://placeholder.convex.cloud'
 )
 
-// ─── Convex API string refs (workshop codegen pending) ────────────────────────
+// ─── Convex API string refs ───────────────────────────────────────────────────
 const workshopApi = {
-  getWorkshopEntities: 'workshop:getWorkshopEntities' as any,
-  getEnvironmentState: 'workshop:getEnvironmentState' as any,
+  getWorkshopEntities:  'workshop:getWorkshopEntities'  as any,
+  getEnvironmentState:  'workshop:getEnvironmentState'  as any,
   upsertWorkshopEntity: 'workshop:upsertWorkshopEntity' as any,
+  logARObservation:     'workshop:logARObservation'     as any,
+  getRecentObservations:'workshop:getRecentObservations' as any,
 }
 
 const WORKSHOP_SESSION_ID = 'workshop-main'
@@ -33,6 +59,9 @@ interface WorkshopEntity {
   color?: string
   label?: string
   createdAt: number
+  anchorId?: string
+  arPlaneId?: string
+  realWorldPosition?: number[]
 }
 
 type HealthStatus = 'nominal' | 'warning' | 'critical'
@@ -102,6 +131,9 @@ function useConvexWorkshopEntities(): WorkshopEntity[] {
       color: e.color,
       label: e.label,
       createdAt: e.createdAt,
+      anchorId: e.anchorId,
+      arPlaneId: e.arPlaneId,
+      realWorldPosition: e.realWorldPosition,
     }))
   }, [convexRaw])
 }
@@ -115,6 +147,142 @@ function useConvexEnvironment(): WorkshopEnvironment {
     }
   }
   return { healthStatus: 'nominal' }
+}
+
+// ─── H.U.G.H. Vision hook ─────────────────────────────────────────────────────
+// NOTE: /api/vision proxies to http://localhost:8080/chat/completions on the VPS.
+// The Vite config (vite.config.ts) routes /api/vision → LFM 2.5 inference server.
+// In production (workshop.grizzlymedicine.icu), add an express/nginx proxy for the
+// same path since the inference endpoint is not browser-accessible.
+
+function useHughVision(sessionId: string, enabled: boolean) {
+  const [lastObservation, setLastObservation] = useState<string>('')
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const captureIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const logObservation = useMutation(workshopApi.logARObservation)
+
+  const captureAndAnalyze = useCallback(async (question?: string) => {
+    if (isAnalyzing) return
+    setIsAnalyzing(true)
+
+    try {
+      // Capture current WebGL frame from the Three.js canvas
+      const glCanvas = document.querySelector('canvas')
+      if (!glCanvas) { setIsAnalyzing(false); return }
+
+      if (!canvasRef.current) {
+        canvasRef.current = document.createElement('canvas')
+      }
+      const captureCanvas = canvasRef.current
+      captureCanvas.width = 640
+      captureCanvas.height = 480
+      const ctx = captureCanvas.getContext('2d')!
+      ctx.drawImage(glCanvas, 0, 0, 640, 480)
+
+      // Convert to base64 JPEG for inference
+      const imageData = captureCanvas.toDataURL('image/jpeg', 0.7).split(',')[1]
+
+      const response = await fetch('/api/vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          imageData,
+          question: question ?? "Describe what you see in this space. List any physical objects, surfaces, and spatial relationships.",
+          systemPrompt: "You are H.U.G.H., an ambient intelligence inhabiting a mixed-reality research lab. Describe what you observe with spatial precision. Identify surfaces, objects, distances, and opportunities for digital augmentation.",
+        }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        const description = result.description ?? result.choices?.[0]?.message?.content ?? ''
+        setLastObservation(description)
+
+        // Persist to Convex ar_observations
+        await logObservation({
+          sessionId,
+          frameDescription: description,
+          detectedObjects: result.detectedObjects ?? [],
+          detectedPlanes: result.detectedPlanes ?? [],
+          operatorQuery: question,
+          confidence: result.confidence ?? 0.8,
+        }).catch((e: unknown) => console.warn('[Hugh Vision] Convex log failed:', e))
+      }
+    } catch (e) {
+      console.warn('[Hugh Vision] capture failed:', e)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }, [sessionId, isAnalyzing, logObservation])
+
+  // Auto-capture every 30s when enabled in AR mode
+  useEffect(() => {
+    if (!enabled) {
+      if (captureIntervalRef.current) clearInterval(captureIntervalRef.current)
+      return
+    }
+    captureIntervalRef.current = setInterval(() => captureAndAnalyze(), 30_000)
+    return () => {
+      if (captureIntervalRef.current) clearInterval(captureIntervalRef.current)
+    }
+  }, [enabled, captureAndAnalyze])
+
+  return { captureAndAnalyze, lastObservation, isAnalyzing }
+}
+
+// ─── XR mode detector — runs inside the Canvas ────────────────────────────────
+
+function XRModeDetector({ onModeChange }: { onModeChange: (isAR: boolean) => void }) {
+  const mode = useXR((xr) => xr.mode)
+  useEffect(() => {
+    onModeChange(mode === 'immersive-ar')
+  }, [mode, onModeChange])
+  return null
+}
+
+// ─── Hit-test reticle — surface-snap for AR entity placement ──────────────────
+// Uses useXRHitTest (the v6 API — note: NOT useHitTest which was v5/drei).
+// useXRHitTest(fn, relativeTo, trackableType) fires every frame in AR session.
+
+function HitTestReticle({
+  onSurfaceDetected,
+}: {
+  onSurfaceDetected: (pos: THREE.Vector3, normal: THREE.Vector3) => void
+}) {
+  const reticleRef = useRef<THREE.Mesh>(null)
+  const matHelper = useRef(new THREE.Matrix4())
+
+  useXRHitTest(
+    (results, getWorldMatrix) => {
+      if (!reticleRef.current) return
+      if (results.length === 0) {
+        reticleRef.current.visible = false
+        return
+      }
+      const hit = results[0]
+      if (getWorldMatrix(matHelper.current, hit)) {
+        matHelper.current.decompose(
+          reticleRef.current.position,
+          reticleRef.current.quaternion,
+          reticleRef.current.scale,
+        )
+        reticleRef.current.visible = true
+        const pos = reticleRef.current.position.clone()
+        const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(reticleRef.current.quaternion)
+        onSurfaceDetected(pos, normal)
+      }
+    },
+    'viewer',       // relative to viewer space
+    ['plane'],      // only hit-test against detected planes
+  )
+
+  return (
+    <mesh ref={reticleRef} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.1, 0.15, 32]} />
+      <meshStandardMaterial color="#00ffff" side={THREE.DoubleSide} transparent opacity={0.8} />
+    </mesh>
+  )
 }
 
 // ─── 3D Sub-components ────────────────────────────────────────────────────────
@@ -160,12 +328,10 @@ const WorkshopEntity3D: React.FC<{ entity: WorkshopEntity }> = ({ entity }) => {
       case 'table':
         return (
           <>
-            {/* Tabletop */}
             <mesh castShadow receiveShadow position={[0, 0.45, 0]}>
               <boxGeometry args={[2, 0.1, 1]} />
               <meshStandardMaterial color={color} roughness={0.7} />
             </mesh>
-            {/* Legs */}
             {([[-0.85, -0.25], [0.85, -0.25], [-0.85, 0.25], [0.85, 0.25]] as [number, number][]).map(([x, z], i) => (
               <mesh key={i} castShadow position={[x, 0.2, z]}>
                 <boxGeometry args={[0.08, 0.5, 0.08]} />
@@ -181,12 +347,10 @@ const WorkshopEntity3D: React.FC<{ entity: WorkshopEntity }> = ({ entity }) => {
               <boxGeometry args={[1.8, 1.1, 0.06]} />
               <meshStandardMaterial color="#0d0d1a" roughness={0.3} metalness={0.6} />
             </mesh>
-            {/* Screen face */}
             <mesh position={[0, 0.6, 0.04]}>
               <boxGeometry args={[1.7, 1.0, 0.01]} />
               <meshStandardMaterial color="#0a2040" emissive="#002255" emissiveIntensity={0.8} />
             </mesh>
-            {/* Stand */}
             <mesh castShadow position={[0, 0.05, 0]}>
               <boxGeometry args={[0.12, 0.1, 0.12]} />
               <meshStandardMaterial color="#2a2a3a" metalness={0.8} />
@@ -276,7 +440,6 @@ const HughPresence: React.FC = () => {
     if (!groupRef.current) return
     const t = clock.getElapsedTime()
     groupRef.current.rotation.y = t * 0.04
-    // Gentle bob
     const pts = groupRef.current.children[0] as THREE.Points
     if (pts?.geometry?.attributes?.position) {
       const pos = pts.geometry.attributes.position
@@ -306,7 +469,7 @@ const HughPresence: React.FC = () => {
   )
 }
 
-// ─── DynamicEntityRenderer — maps Convex DB documents → Three.js meshes ──────
+// ─── DynamicEntityRenderer ────────────────────────────────────────────────────
 
 function EntityMesh({ entity }: { entity: WorkshopEntity }) {
   const meshRef = useRef<THREE.Mesh>(null)
@@ -366,7 +529,8 @@ function DynamicEntityRenderer({ entities }: { entities: WorkshopEntity[] }) {
     </>
   )
 }
-const AmbientHealthLight: React.FC<{ status: HealthStatus }> = ({ status }) => {
+
+const AmbientHealthLight: React.FC<{ status: HealthStatus; isARMode: boolean }> = ({ status, isARMode }) => {
   const ambRef = useRef<THREE.AmbientLight>(null)
   const targetColor = useRef(new THREE.Color(HEALTH_COLORS[status]))
   const currentColor = useRef(new THREE.Color(HEALTH_COLORS[status]))
@@ -379,24 +543,30 @@ const AmbientHealthLight: React.FC<{ status: HealthStatus }> = ({ status }) => {
     if (!ambRef.current) return
     currentColor.current.lerp(targetColor.current, delta * 1.2)
     ambRef.current.color.copy(currentColor.current)
+    // In AR mode, keep ambient minimal — real-world light dominates
+    const targetIntensity = isARMode ? 0.05 : HEALTH_AMBIENT[status]
     ambRef.current.intensity = THREE.MathUtils.lerp(
       ambRef.current.intensity,
-      HEALTH_AMBIENT[status],
-      delta * 1.2
+      targetIntensity,
+      delta * 1.2,
     )
   })
 
   return (
     <>
-      <ambientLight ref={ambRef} color={HEALTH_COLORS[status]} intensity={HEALTH_AMBIENT[status]} />
-      <directionalLight
-        position={[5, 10, 5]}
-        intensity={0.6}
-        color="#4080c0"
-        castShadow
-        shadow-mapSize={[1024, 1024]}
-      />
-      <pointLight position={[0, 6, 0]} intensity={0.8} color="#103050" distance={20} />
+      <ambientLight ref={ambRef} color={HEALTH_COLORS[status]} intensity={isARMode ? 0.05 : HEALTH_AMBIENT[status]} />
+      {!isARMode && (
+        <>
+          <directionalLight
+            position={[5, 10, 5]}
+            intensity={0.6}
+            color="#4080c0"
+            castShadow
+            shadow-mapSize={[1024, 1024]}
+          />
+          <pointLight position={[0, 6, 0]} intensity={0.8} color="#103050" distance={20} />
+        </>
+      )}
     </>
   )
 }
@@ -408,12 +578,20 @@ interface HUDProps {
   health: HealthStatus
   entities: WorkshopEntity[]
   xrSupported: boolean
+  arSupported: boolean
+  isARMode: boolean
+  isAnalyzingVision: boolean
+  lastObservation: string
   onVoiceToggle: () => void
   onEnterVR: () => void
+  onEnterAR: () => void
+  onVisionCapture: () => void
 }
 
 const WorkshopHUD: React.FC<HUDProps> = ({
-  voice, health, entities, xrSupported, onVoiceToggle, onEnterVR,
+  voice, health, entities, xrSupported, arSupported, isARMode,
+  isAnalyzingVision, lastObservation,
+  onVoiceToggle, onEnterVR, onEnterAR, onVisionCapture,
 }) => {
   const healthLabel: Record<HealthStatus, string> = {
     nominal: 'NOMINAL',
@@ -433,7 +611,9 @@ const WorkshopHUD: React.FC<HUDProps> = ({
         <div className="bg-black/70 backdrop-blur-md border border-cyan-900/60 rounded-xl px-4 py-3 space-y-2 min-w-[220px]">
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
-            <span className="text-xs font-mono text-cyan-400 tracking-widest uppercase">Workshop Active</span>
+            <span className="text-xs font-mono text-cyan-400 tracking-widest uppercase">
+              {isARMode ? 'Mixed Reality Active' : 'Workshop Active'}
+            </span>
           </div>
           <div className="flex items-center space-x-2">
             <div className={`w-2 h-2 rounded-full ${healthDot[health]} ${health !== 'nominal' ? 'animate-pulse' : ''}`} />
@@ -442,7 +622,7 @@ const WorkshopHUD: React.FC<HUDProps> = ({
             </span>
           </div>
           <div className="text-[10px] font-mono text-gray-600 border-t border-gray-800 pt-1">
-            ENTITIES: {entities.length}
+            ENTITIES: {entities.length} {isARMode ? '· AR ANCHORED' : ''}
           </div>
         </div>
       </div>
@@ -473,8 +653,21 @@ const WorkshopHUD: React.FC<HUDProps> = ({
         </div>
       )}
 
+      {/* H.U.G.H. vision observation panel */}
+      {lastObservation && (
+        <div className="absolute top-4 right-4 max-w-xs pointer-events-auto">
+          <div className="bg-black/80 backdrop-blur-md border border-cyan-700/50 rounded-xl px-4 py-3">
+            <div className="flex items-center space-x-2 mb-2">
+              <span className="text-cyan-400 text-xs">👁</span>
+              <span className="text-[10px] font-mono text-cyan-500 tracking-widest uppercase">H.U.G.H. Sees</span>
+            </div>
+            <p className="text-xs text-gray-300 leading-relaxed line-clamp-5">{lastObservation}</p>
+          </div>
+        </div>
+      )}
+
       {/* Bottom controls */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center space-x-3 pointer-events-auto">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center space-x-3 pointer-events-auto flex-wrap justify-center gap-y-2">
         {voice.supported ? (
           <button
             onClick={onVoiceToggle}
@@ -495,13 +688,41 @@ const WorkshopHUD: React.FC<HUDProps> = ({
           </div>
         )}
 
+        {/* Enter VR button */}
         {xrSupported && (
           <button
-            onClick={() => xrStore.enterVR()}
+            onClick={onEnterVR}
             className="flex items-center space-x-2 px-5 py-3 rounded-xl font-mono text-sm font-bold tracking-wider bg-indigo-700/40 border border-indigo-500/60 text-indigo-300 hover:bg-indigo-600/50 transition-all shadow-lg shadow-indigo-900/30"
           >
             <span className="material-icons-outlined text-base">vrpanos</span>
-            <span>ENTER VR</span>
+            <span>✦ ENTER VR</span>
+          </button>
+        )}
+
+        {/* Enter Mixed Reality (passthrough AR) button */}
+        {arSupported && (
+          <button
+            onClick={onEnterAR}
+            className="flex items-center space-x-2 px-5 py-3 rounded-xl font-mono text-sm font-bold tracking-wider bg-cyan-900/40 border border-cyan-400/70 text-cyan-300 hover:bg-cyan-800/50 transition-all shadow-lg shadow-cyan-900/30"
+          >
+            <span className="text-base">◎</span>
+            <span>ENTER MR</span>
+          </button>
+        )}
+
+        {/* H.U.G.H. vision capture button — visible in AR mode */}
+        {isARMode && (
+          <button
+            onClick={onVisionCapture}
+            disabled={isAnalyzingVision}
+            className={`flex items-center space-x-2 px-5 py-3 rounded-xl font-mono text-sm font-bold tracking-wider transition-all border ${
+              isAnalyzingVision
+                ? 'bg-cyan-900/20 border-cyan-700/30 text-cyan-600 cursor-wait'
+                : 'bg-teal-900/40 border-teal-400/60 text-teal-300 hover:bg-teal-800/50'
+            }`}
+          >
+            <span className="text-base">👁</span>
+            <span>{isAnalyzingVision ? 'ANALYZING…' : 'WHAT DO YOU SEE?'}</span>
           </button>
         )}
       </div>
@@ -510,7 +731,9 @@ const WorkshopHUD: React.FC<HUDProps> = ({
       {entities.length === 0 && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 text-center">
           <p className="text-xs font-mono text-gray-700 tracking-wider">
-            Say &ldquo;create a table&rdquo; · &ldquo;add a screen&rdquo; · &ldquo;spawn a light&rdquo;
+            {isARMode
+              ? 'In MR: point at surfaces to anchor entities · say "create a table"'
+              : 'Say "create a table" · "add a screen" · "spawn a light"'}
           </p>
         </div>
       )}
@@ -523,26 +746,33 @@ const WorkshopHUD: React.FC<HUDProps> = ({
 const WorkshopScene: React.FC<{
   entities: WorkshopEntity[]
   health: HealthStatus
-}> = ({ entities, health }) => (
-  <XR store={xrStore}>
-    <AmbientHealthLight status={health} />
-    <WorkshopFloor />
+  isARMode: boolean
+  onModeChange: (isAR: boolean) => void
+  onSurfaceDetected: (pos: THREE.Vector3, normal: THREE.Vector3) => void
+}> = ({ entities, health, isARMode, onModeChange, onSurfaceDetected }) => (
+  <>
+    <XRModeDetector onModeChange={onModeChange} />
+    <AmbientHealthLight status={health} isARMode={isARMode} />
+    {/* In AR mode, suppress the dark floor/grid — passthrough shows the real floor */}
+    {!isARMode && <WorkshopFloor />}
     <HughPresence />
     <DynamicEntityRenderer entities={entities} />
-    <OrbitControls
-      enablePan
-      enableZoom
-      enableRotate
-      minDistance={2}
-      maxDistance={30}
-      target={[0, 0.5, 0]}
-    />
-  </XR>
+    {/* Hit-test reticle only active during AR session */}
+    {isARMode && <HitTestReticle onSurfaceDetected={onSurfaceDetected} />}
+    {!isARMode && (
+      <OrbitControls
+        enablePan
+        enableZoom
+        enableRotate
+        minDistance={2}
+        maxDistance={30}
+        target={[0, 0.5, 0]}
+      />
+    )}
+  </>
 )
 
-// ─── Main Workshop component ──────────────────────────────────────────────────
-
-// ─── Main Workshop inner component (requires ConvexProvider) ─────────────────
+// ─── Main Workshop inner component (requires ConvexProvider) ──────────────────
 
 const WorkshopInner: React.FC = () => {
   // ── Convex real-time sync ────────────────────────────────────────────────────
@@ -552,43 +782,65 @@ const WorkshopInner: React.FC = () => {
 
   // ── Local optimistic state ───────────────────────────────────────────────────
   const [localEntities, setLocalEntities] = useState<WorkshopEntity[]>([])
-  // Merge: show local entities not yet reflected in Convex (optimistic UI)
   const entities = useMemo(() => {
     const convexIds = new Set(convexEntities.map(e => e.id))
     return [...convexEntities, ...localEntities.filter(e => !convexIds.has(e.id))]
   }, [convexEntities, localEntities])
 
   const [xrSupported, setXrSupported] = useState(false)
+  const [arSupported, setArSupported] = useState(false)
+  const [isARMode, setIsARMode] = useState(false)
+  const [canvasError, setCanvasError] = useState<string | null>(null)
+
+  // Last surface detected by hit-test — used to anchor AR entity spawns
+  const lastSurfacePos = useRef<THREE.Vector3 | null>(null)
+
   const [voice, setVoice] = useState<VoiceState>({
     isListening: false,
     transcript: '',
     interimTranscript: '',
     supported: !!(window.SpeechRecognition ?? window.webkitSpeechRecognition),
   })
-  const [canvasError, setCanvasError] = useState<string | null>(null)
 
   const recognitionRef = useRef<any>(null)
   const entityCountRef = useRef(0)
 
-  // Check WebXR support
+  // H.U.G.H. vision hook — auto-capture enabled only in AR mode
+  const { captureAndAnalyze, lastObservation, isAnalyzing } = useHughVision(
+    WORKSHOP_SESSION_ID,
+    isARMode,
+  )
+
+  // Check WebXR support for VR and AR
   useEffect(() => {
-    if (navigator.xr) {
-      navigator.xr.isSessionSupported('immersive-vr')
-        .then(supported => setXrSupported(supported))
-        .catch(() => setXrSupported(false))
-    }
+    if (!navigator.xr) return
+    navigator.xr.isSessionSupported('immersive-vr')
+      .then(ok => setXrSupported(ok))
+      .catch(() => {})
+    navigator.xr.isSessionSupported('immersive-ar')
+      .then(ok => setArSupported(ok))
+      .catch(() => {})
   }, [])
 
-  // Spawn entity: optimistic local add + Convex mutation
+  const handleModeChange = useCallback((isAR: boolean) => {
+    setIsARMode(isAR)
+  }, [])
+
+  const handleSurfaceDetected = useCallback((pos: THREE.Vector3) => {
+    lastSurfacePos.current = pos.clone()
+  }, [])
+
+  // Spawn entity: in AR mode use hit-test surface, otherwise random radius
   const spawnEntity = useCallback(async (partial: Partial<WorkshopEntity>) => {
     const id = `entity-${Date.now()}-${entityCountRef.current++}`
-    const angle = Math.random() * Math.PI * 2
-    const radius = 1.5 + Math.random() * 3
-    const spawnPosition: [number, number, number] = [
-      Math.cos(angle) * radius,
-      0,
-      Math.sin(angle) * radius,
-    ]
+    const spawnPosition: [number, number, number] = isARMode && lastSurfacePos.current
+      ? [lastSurfacePos.current.x, lastSurfacePos.current.y, lastSurfacePos.current.z]
+      : (() => {
+          const angle = Math.random() * Math.PI * 2
+          const radius = 1.5 + Math.random() * 3
+          return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius] as [number, number, number]
+        })()
+
     const entityType = partial.type ?? 'box'
     const entity: WorkshopEntity = {
       id,
@@ -597,11 +849,12 @@ const WorkshopInner: React.FC = () => {
       color: partial.color,
       label: entityType.toUpperCase(),
       createdAt: Date.now(),
+      realWorldPosition: isARMode && lastSurfacePos.current
+        ? [lastSurfacePos.current.x, lastSurfacePos.current.y, lastSurfacePos.current.z]
+        : undefined,
     }
-    // Optimistic: add to local state immediately
     setLocalEntities(prev => [...prev, entity])
 
-    // Persist to Convex; map box/sphere/plane → 'custom' (schema constraint)
     const convexType = (['box', 'sphere', 'plane'] as string[]).includes(entityType)
       ? 'custom'
       : entityType as 'table' | 'chair' | 'screen' | 'light' | 'custom'
@@ -617,11 +870,12 @@ const WorkshopInner: React.FC = () => {
         scaleX: 1, scaleY: 1, scaleZ: 1,
         color: partial.color ?? '#888888',
         visible: true,
+        ...(entity.realWorldPosition && { realWorldPosition: entity.realWorldPosition }),
       })
     } catch (e) {
       console.warn('[Workshop] Convex upsert failed:', e)
     }
-  }, [upsertEntity])
+  }, [upsertEntity, isARMode])
 
   // Voice recognition
   const startListening = useCallback(() => {
@@ -676,8 +930,22 @@ const WorkshopInner: React.FC = () => {
     else startListening()
   }, [voice.isListening, startListening, stopListening])
 
-  // Cleanup on unmount
   useEffect(() => () => { recognitionRef.current?.stop() }, [])
+
+  const hudProps = {
+    voice,
+    health: env.healthStatus,
+    entities,
+    xrSupported,
+    arSupported,
+    isARMode,
+    isAnalyzingVision: isAnalyzing,
+    lastObservation,
+    onVoiceToggle: handleVoiceToggle,
+    onEnterVR: () => xrStore.enterVR(),
+    onEnterAR: () => arStore.enterAR(),
+    onVisionCapture: () => captureAndAnalyze(),
+  }
 
   if (canvasError) {
     return (
@@ -690,48 +958,47 @@ const WorkshopInner: React.FC = () => {
           <p className="text-gray-500 text-sm max-w-md">{canvasError}</p>
           <p className="text-gray-600 text-xs mt-2">WebGL may be disabled in this browser.</p>
         </div>
-        <WorkshopHUD
-          voice={voice}
-          health={env.healthStatus}
-          entities={entities}
-          xrSupported={xrSupported}
-          onVoiceToggle={handleVoiceToggle}
-          onEnterVR={() => xrStore.enterVR()}
-        />
+        <WorkshopHUD {...hudProps} />
       </div>
     )
   }
+
+  // In AR mode, Canvas must be transparent so passthrough video shows through
+  const canvasStyle: React.CSSProperties = isARMode
+    ? { background: 'transparent' }
+    : { background: '#04080f' }
 
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
       {/* HUD layer */}
       <div className="absolute inset-0 z-10 pointer-events-none">
-        <WorkshopHUD
-          voice={voice}
-          health={env.healthStatus}
-          entities={entities}
-          xrSupported={xrSupported}
-          onVoiceToggle={handleVoiceToggle}
-          onEnterVR={() => xrStore.enterVR()}
-        />
+        <WorkshopHUD {...hudProps} />
       </div>
 
-      {/* 3D Canvas */}
+      {/* 3D Canvas — XR wraps both stores; active store is whichever entered session */}
       <Canvas
         shadows
-        gl={{ antialias: true, alpha: false }}
+        gl={{ antialias: true, alpha: isARMode }}
         camera={{ position: [0, 4, 10], fov: 60, near: 0.1, far: 100 }}
-        style={{ background: '#04080f' }}
+        style={canvasStyle}
         onCreated={({ gl }) => {
-          gl.setClearColor(new THREE.Color('#04080f'))
+          if (!isARMode) gl.setClearColor(new THREE.Color('#04080f'))
           gl.shadowMap.enabled = true
           gl.shadowMap.type = THREE.PCFSoftShadowMap
         }}
         onError={() => setCanvasError('WebGL context failed to initialise.')}
       >
-        <Suspense fallback={null}>
-          <WorkshopScene entities={entities} health={env.healthStatus} />
-        </Suspense>
+        <XR store={xrStore}>
+          <Suspense fallback={null}>
+            <WorkshopScene
+              entities={entities}
+              health={env.healthStatus}
+              isARMode={isARMode}
+              onModeChange={handleModeChange}
+              onSurfaceDetected={handleSurfaceDetected}
+            />
+          </Suspense>
+        </XR>
       </Canvas>
     </div>
   )
