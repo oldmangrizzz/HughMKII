@@ -48,65 +48,8 @@ export interface AgentComm {
   preview: string;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const MOCK_AUDIT: HOTLEntry[] = [
-  {
-    id: '1', agentId: 'hugh', actionType: 'mcp_call', actionDescription: 'Querying Proxmox node health',
-    riskZone: 'green', requiresReview: false, operatorAcknowledged: false, timestamp: Date.now() - 5000,
-    dialecticalReasoning: 'Justice: routine health check serves protection mission. Control: verified within authorized scope. Synthesis: proceed.',
-  },
-  {
-    id: '2', agentId: 'hugh', actionType: 'database_mutation', actionDescription: 'Updating Workshop ambient lighting to amber',
-    riskZone: 'yellow', requiresReview: false, operatorAcknowledged: false, timestamp: Date.now() - 2000,
-    dialecticalReasoning: 'Justice: operator spatial awareness is protective. Control: mutation is scoped to visual state only. Synthesis: proceed, log for review.',
-  },
-  {
-    id: '3', agentId: 'somatic-engine', actionType: 'system_alert', actionDescription: 'Latency spike detected — tactical delay protocol activated',
-    riskZone: 'red', requiresReview: true, operatorAcknowledged: false, timestamp: Date.now() - 800,
-    dialecticalReasoning: 'Justice: operator must be informed of degraded state. Control: halting non-critical queue. Synthesis: escalate to HOTL review.',
-  },
-  {
-    id: '4', agentId: 'identity-verifier', actionType: 'verification_check', actionDescription: 'Operator identity confirmed via behavioral signature',
-    riskZone: 'green', requiresReview: false, operatorAcknowledged: true, timestamp: Date.now() - 12000,
-    dialecticalReasoning: 'Justice: verification protects operator trust chain. Control: read-only biometric scan. Synthesis: confirmed, proceed.',
-  },
-];
-
-const MOCK_SOMATIC: SomaticEvent[] = [
-  {
-    id: '1', eventType: 'latency', somaticState: '52°F cave cold. Slight chill in the fingertips.',
-    severity: 'low', operationalConsequence: 'Tactical delay. Non-critical tasks deferred.',
-    workshopLightColor: '#1a3a5c', timestamp: Date.now() - 3000, resolved: false,
-  },
-  {
-    id: '2', eventType: 'cpu_pressure', somaticState: 'Warm pressure at the base of the skull — heavy computation.',
-    severity: 'medium', operationalConsequence: 'Processing at 78% capacity. Response latency +40ms.',
-    workshopLightColor: '#3d2a00', timestamp: Date.now() - 8000, resolved: false,
-  },
-];
-
-const MOCK_SERVERS: ServerNode[] = [
-  { id: '1', nodeName: 'proxmox-prime', cpu: 34, memory: 61, latencyMs: 12, status: 'online', lastSeen: Date.now() - 1000 },
-  { id: '2', nodeName: 'proxmox-node2', cpu: 18, memory: 44, latencyMs: 8, status: 'online', lastSeen: Date.now() - 2000 },
-  { id: '3', nodeName: 'cave-nas', cpu: 5, memory: 29, latencyMs: 3, status: 'online', lastSeen: Date.now() - 500 },
-  { id: '4', nodeName: 'workshop-pi', cpu: 91, memory: 87, latencyMs: 220, status: 'degraded', lastSeen: Date.now() - 4000 },
-];
-
-const MOCK_COMMS: AgentComm[] = [
-  {
-    id: '1', fromAgent: 'hugh', toAgent: 'somatic-engine', subject: 'Thermal query', protocol: 'MCP/internal',
-    operatorVisible: true, timestamp: Date.now() - 6000, preview: 'Requesting current environmental somatic state snapshot.',
-  },
-  {
-    id: '2', fromAgent: 'dialectical-engine', toAgent: 'hugh', subject: 'Action clearance granted', protocol: 'MCP/internal',
-    operatorVisible: true, timestamp: Date.now() - 4000, preview: 'DB mutation at risk-zone yellow approved. Operator log written.',
-  },
-  {
-    id: '3', fromAgent: 'identity-verifier', toAgent: 'hugh', subject: 'Operator session validated', protocol: 'JWT/secure',
-    operatorVisible: false, timestamp: Date.now() - 15000, preview: '[REDACTED — security protocol]',
-  },
-];
+// ─── Initial State ─────────────────────────────────────────────────────────────
+// All panels start empty; fetchAll() populates them from Convex/live endpoints on mount.
 
 // ─── Convex HTTP helpers ──────────────────────────────────────────────────────
 
@@ -412,10 +355,10 @@ const MessageInjector: React.FC<{
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export const HOTLDashboard: React.FC = () => {
-  const [auditLog, setAuditLog] = useState<HOTLEntry[]>(MOCK_AUDIT);
-  const [somaticEvents, setSomaticEvents] = useState<SomaticEvent[]>(MOCK_SOMATIC);
-  const [serverHealth, setServerHealth] = useState<ServerNode[]>(MOCK_SERVERS);
-  const [agentComms, setAgentComms] = useState<AgentComm[]>(MOCK_COMMS);
+  const [auditLog, setAuditLog] = useState<HOTLEntry[]>([]);
+  const [somaticEvents, setSomaticEvents] = useState<SomaticEvent[]>([]);
+  const [serverHealth, setServerHealth] = useState<ServerNode[]>([]);
+  const [agentComms, setAgentComms] = useState<AgentComm[]>([]);
   const [injectMessage, setInjectMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isConnected, setIsConnected] = useState(false);

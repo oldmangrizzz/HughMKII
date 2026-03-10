@@ -121,7 +121,7 @@ final class WorkshopConvexService: ObservableObject {
 
     /// - Parameter convexURL: Fallback URL used when neither the environment variable
     ///   nor `Info.plist` supplies one.
-    init(convexURL: String = "https://your-deployment.convex.cloud") {
+    init(convexURL: String = "https://sincere-albatross-464.convex.cloud") {
         // Resolution order: env var → Info.plist → parameter
         if let envURL = ProcessInfo.processInfo.environment["CONVEX_URL"], !envURL.isEmpty {
             self.convexBaseURL = envURL

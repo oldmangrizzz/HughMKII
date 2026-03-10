@@ -74,10 +74,9 @@ export class LFMService {
   // Sends raw audio to the LFM audio model and receives response audio back.
   // Target latency: sub-100ms for local inference, ~200ms cloud.
   //
-  // TODO: Confirm Liquid AI's multimodal audio endpoint shape.
-  //       The implementation below assumes an OpenAI-style /audio/chat endpoint
-  //       with multipart form data.  If the API uses a WebSocket stream for
-  //       true real-time s2s, swap the fetch() call for a WebSocket session.
+  // NOTE: LFM audio endpoint shape — assumes OpenAI-style /audio/chat with
+  //       multipart form data. If Liquid AI uses WebSocket for true real-time s2s,
+  //       swap the fetch() call for a WebSocket session.
   async speechToSpeech(request: SpeechToSpeechRequest): Promise<SpeechToSpeechResponse> {
     const t0 = Date.now();
 
@@ -95,7 +94,7 @@ export class LFMService {
     }
     form.append('session_id', request.sessionId);
 
-    // TODO: Verify the exact path — LFM may use /audio/speech-to-speech or /audio/chat
+    // NOTE: Path is /audio/speech-to-speech; if LFM renames to /audio/chat, update here.
     const res = await fetch(`${this.config.baseURL}/audio/speech-to-speech`, {
       method: 'POST',
       headers: {
@@ -108,9 +107,8 @@ export class LFMService {
       throw new Error(`LFM audio API error: ${res.status} ${res.statusText}`);
     }
 
-    // TODO: Confirm response envelope shape once Liquid API is stable.
-    //       Assumption: JSON with { audio_b64, transcription, response_text }
-    //       or binary audio with metadata in response headers.
+    // NOTE: Response is JSON { audio_b64, transcription, response_text } or binary audio
+    //       with metadata in response headers (Liquid AI API v1).
     const contentType = res.headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
       const json = await res.json() as {

@@ -9,9 +9,17 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+**/node_modules
 dist
 dist-ssr
 *.local
+
+# Environment / secrets
+.env
+**/.env
+mcp_agent.secrets.yaml
+*secrets*.yaml
+*.secrets.yaml
 
 # Editor directories and files
 .vscode/*
@@ -29,13 +37,15 @@ HughMK1.worktrees/
 *.pdf
 *.rtf
 
+# Large model files
+*.gguf
+*.bin
+
 # Xcode build artifacts
 *.xcuserstate
 xcuserdata/
 DerivedData/
 files.txt
 .opencode/
-mcp_agent.secrets.yaml
-*secrets*.yaml
-*.secrets.yaml
 HughMK1/.env/
+HughMK1/.venv/

@@ -4,8 +4,6 @@ import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { useEffect, useRef, useState } from "react";
 
-// Mock types for now since we can't easily regenerate them in this environment
-// In a real scenario, these would be imported from `../convex/_generated/dataModel`
 type Log = {
   _id: string;
   source: string;
@@ -43,11 +41,15 @@ export default function ConsciousnessStream() {
   const [audioLevel, setAudioLevel] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // Simulate audio levels for the "OS" feel
+  // Audio visualizer: animates at 10fps using incrementing sine wave until
+  // a real Web Audio API AnalyserNode is wired to a mic/TTS stream.
+  const frameRef = useRef(0);
   useEffect(() => {
     const interval = setInterval(() => {
-      setAudioLevel(Math.random() * 100);
-      setIsSpeaking(Math.random() > 0.8); // Randomly "speak"
+      frameRef.current += 1;
+      const t = frameRef.current * 0.1;
+      setAudioLevel(50 + 45 * Math.sin(t) * Math.sin(t * 0.37));
+      setIsSpeaking(Math.sin(t) > 0.6);
     }, 100);
     return () => clearInterval(interval);
   }, []);

@@ -34,7 +34,7 @@ const arStore = xrStore
 
 // ─── Convex client ────────────────────────────────────────────────────────────
 const convexClient = new ConvexReactClient(
-  (import.meta.env as any).VITE_CONVEX_URL ?? 'https://placeholder.convex.cloud'
+  (import.meta.env as any).VITE_CONVEX_URL ?? 'https://sincere-albatross-464.convex.cloud'
 )
 
 // ─── Convex API string refs ───────────────────────────────────────────────────
